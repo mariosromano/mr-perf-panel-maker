@@ -1,0 +1,1500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>M|R Walls Perf Panel Maker</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #1a1a1e;
+    --sidebar-bg: #222226;
+    --surface: #2a2a2e;
+    --border: #3a3a3e;
+    --text: #e0e0e0;
+    --text-dim: #888;
+    --accent: #4a9eff;
+    --accent-hover: #3a8eef;
+    --danger: #e55;
+    --sidebar-w: 320px;
+  }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--text); display: flex;
+  }
+  #sidebar {
+    width: var(--sidebar-w); min-width: var(--sidebar-w); background: var(--sidebar-bg);
+    border-right: 1px solid var(--border); display: flex; flex-direction: column;
+    overflow-y: auto; overflow-x: hidden;
+  }
+  #sidebar::-webkit-scrollbar { width: 6px; }
+  #sidebar::-webkit-scrollbar-track { background: transparent; }
+  #sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .brand {
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+    font-size: 15px; font-weight: 700; letter-spacing: 1px;
+    background: linear-gradient(135deg, #2a2a2e, #1a1a1e);
+  }
+  .brand span { color: var(--accent); }
+  .section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .section-title {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 1px; color: var(--text-dim); margin-bottom: 10px;
+  }
+  .sub-label { font-size: 11px; color: var(--text-dim); margin-bottom: 5px; }
+  .dropzone {
+    border: 2px dashed var(--border); border-radius: 8px; padding: 24px 12px;
+    text-align: center; cursor: pointer; transition: border-color .2s, background .2s;
+    font-size: 13px; color: var(--text-dim); position: relative;
+  }
+  .dropzone.dragover { border-color: var(--accent); background: rgba(74,158,255,.08); }
+  .dropzone.has-image { padding: 8px; }
+  .dropzone img { max-width: 100%; max-height: 140px; border-radius: 4px; display: block; margin: 0 auto; }
+  .dropzone input[type="file"] { display: none; }
+  .clear-btn {
+    position: absolute; top: 4px; right: 4px; background: var(--danger); color: #fff;
+    border: none; border-radius: 50%; width: 22px; height: 22px; cursor: pointer;
+    font-size: 14px; line-height: 1; display: none;
+  }
+  .dropzone.has-image .clear-btn { display: block; }
+  label.ctrl {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 8px; font-size: 13px;
+  }
+  label.ctrl .label-text { flex: 1; }
+  label.ctrl input[type="range"] { width: 120px; accent-color: var(--accent); }
+  label.ctrl input[type="number"] {
+    width: 64px; background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); border-radius: 4px; padding: 3px 6px; font-size: 13px; text-align: right;
+  }
+  label.ctrl .value { width: 36px; text-align: right; font-size: 12px; color: var(--text-dim); margin-left: 4px; }
+  .row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .row label.ctrl { flex: 1; margin-bottom: 0; }
+  .toggle-row {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 8px; font-size: 13px;
+  }
+  .toggle {
+    width: 36px; height: 20px; background: var(--border); border-radius: 10px;
+    position: relative; cursor: pointer; transition: background .2s;
+  }
+  .toggle.active { background: var(--accent); }
+  .toggle::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 16px; height: 16px; background: #fff; border-radius: 50%; transition: left .2s;
+  }
+  .toggle.active::after { left: 18px; }
+  .preset-btns { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+  .preset-btn {
+    padding: 4px 10px; font-size: 11px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); border-radius: 4px;
+    cursor: pointer; transition: border-color .2s;
+  }
+  .preset-btn:hover { border-color: var(--accent); }
+  .preset-btn.active { border-color: var(--accent); background: rgba(74,158,255,.15); }
+  .size-toggles { display: flex; gap: 5px; margin-bottom: 8px; flex-wrap: wrap; }
+  .size-tog {
+    padding: 3px 8px; font-size: 11px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text-dim); border-radius: 4px;
+    cursor: pointer; transition: all .2s; user-select: none;
+  }
+  .size-tog:hover { border-color: var(--accent); }
+  .size-tog.active { border-color: var(--accent); background: rgba(74,158,255,.15); color: var(--text); }
+  .color-input {
+    width: 32px; height: 24px; border: 1px solid var(--border); border-radius: 4px;
+    background: none; cursor: pointer; padding: 1px;
+  }
+  .stats-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-size: 12px;
+  }
+  .stats-grid .stat-label { color: var(--text-dim); }
+  .stats-grid .stat-value { text-align: right; font-weight: 600; }
+  .export-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  .export-btn {
+    flex: 1; padding: 8px 0; font-size: 13px; font-weight: 600;
+    border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    border-radius: 6px; cursor: pointer; transition: all .2s; min-width: 60px;
+  }
+  .export-btn:hover { border-color: var(--accent); background: rgba(74,158,255,.1); }
+  .layout-info {
+    font-size: 11px; color: var(--text); margin-top: 6px; padding: 8px;
+    background: rgba(74,158,255,.06); border: 1px solid var(--border); border-radius: 4px; line-height: 1.6;
+  }
+  .layout-info .li-label { color: var(--text-dim); }
+  .layout-info .li-accent { color: var(--accent); font-weight: 600; }
+  .layout-select {
+    width: 100%; margin-bottom: 8px; background: var(--surface);
+    border: 1px solid var(--border); color: var(--text); border-radius: 4px;
+    padding: 5px 8px; font-size: 12px;
+  }
+  .export-select {
+    width: 100%; margin-bottom: 8px; background: var(--surface);
+    border: 1px solid var(--border); color: var(--text); border-radius: 4px;
+    padding: 5px 8px; font-size: 13px;
+  }
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .tabs {
+    display: flex; background: var(--sidebar-bg); border-bottom: 1px solid var(--border); padding: 0 12px;
+  }
+  .tab {
+    padding: 10px 20px; font-size: 13px; font-weight: 600; cursor: pointer;
+    border-bottom: 2px solid transparent; color: var(--text-dim); transition: all .2s;
+  }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .tab:hover { color: var(--text); }
+  #viewport { flex: 1; position: relative; overflow: hidden; background: #111; }
+  #canvas2d {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    display: block; cursor: grab;
+  }
+  #canvas2d:active { cursor: grabbing; }
+  #container3d { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: none; }
+  #container3d canvas { display: block; }
+  .zoom-info {
+    position: absolute; bottom: 8px; left: 8px; font-size: 11px;
+    color: var(--text-dim); background: rgba(0,0,0,.5); padding: 3px 8px;
+    border-radius: 4px; pointer-events: none;
+  }
+  .no-image-msg {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    text-align: center; color: var(--text-dim); font-size: 14px; pointer-events: none;
+  }
+  .no-image-msg p { margin-top: 6px; font-size: 12px; }
+  .lock-btn {
+    width: 24px; height: 24px; background: var(--surface); border: 1px solid var(--border);
+    color: var(--text-dim); border-radius: 4px; cursor: pointer; font-size: 12px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .lock-btn.active { color: var(--accent); border-color: var(--accent); }
+  #guidePanel {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    overflow-y: auto; display: none; background: #111;
+    padding: 32px 40px 60px; color: var(--text);
+  }
+  #guidePanel::-webkit-scrollbar { width: 6px; }
+  #guidePanel::-webkit-scrollbar-track { background: transparent; }
+  #guidePanel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .guide-content { max-width: 720px; margin: 0 auto; }
+  .guide-content h2 {
+    font-size: 18px; font-weight: 700; margin: 0 0 16px;
+    color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 8px;
+  }
+  .guide-content h3 { font-size: 14px; font-weight: 700; margin: 20px 0 8px; color: #fff; }
+  .guide-content p { font-size: 13px; line-height: 1.7; color: #bbb; margin: 0 0 10px; }
+  .guide-content ul { font-size: 13px; line-height: 1.7; color: #bbb; margin: 0 0 12px; padding-left: 20px; }
+  .guide-content li { margin-bottom: 4px; }
+  .guide-content strong { color: #e0e0e0; }
+  .guide-content .step-num {
+    display: inline-block; width: 22px; height: 22px; border-radius: 50%;
+    background: var(--accent); color: #111; font-size: 12px; font-weight: 700;
+    text-align: center; line-height: 22px; margin-right: 8px; flex-shrink: 0;
+  }
+  .guide-content .step-row { display: flex; align-items: flex-start; margin-bottom: 12px; }
+  .guide-content .step-row p { margin: 0; }
+  .guide-content .tip {
+    background: rgba(74,158,255,.08); border-left: 3px solid var(--accent);
+    padding: 8px 12px; margin: 10px 0 14px; font-size: 12px; color: #aaa; border-radius: 0 4px 4px 0;
+  }
+  .guide-content .warn {
+    background: rgba(255,170,68,.08); border-left: 3px solid #fa3;
+    padding: 8px 12px; margin: 10px 0 14px; font-size: 12px; color: #caa; border-radius: 0 4px 4px 0;
+  }
+  .guide-content .section-ref { color: var(--accent); font-weight: 600; }
+</style>
+</head>
+<body>
+<div id="sidebar">
+  <div class="brand"><span>M|R</span> Walls Perf Panel Maker</div>
+
+  <div class="section">
+    <div class="section-title">Source Image</div>
+    <div class="dropzone" id="dropzone">
+      <button class="clear-btn" id="clearBtn">&times;</button>
+      <p>Drop image here or click to browse</p>
+      <input type="file" id="fileInput" accept="image/*">
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Image Adjustments</div>
+    <label class="ctrl"><span class="label-text">Brightness</span>
+      <input type="range" id="brightness" min="-100" max="100" value="0">
+      <span class="value" id="brightnessVal">0</span></label>
+    <label class="ctrl"><span class="label-text">Contrast</span>
+      <input type="range" id="contrast" min="-100" max="100" value="0">
+      <span class="value" id="contrastVal">0</span></label>
+    <div class="toggle-row"><span>Invert</span><div class="toggle" id="invertToggle"></div></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Wall Dimensions</div>
+    <div class="row">
+      <label class="ctrl"><span class="label-text">W (ft)</span>
+        <input type="number" id="wallW" value="20" min="1" max="200" step="0.5"></label>
+      <label class="ctrl"><span class="label-text">H (ft)</span>
+        <input type="number" id="wallH" value="10" min="1" max="200" step="0.5"></label>
+    </div>
+    <label class="ctrl"><span class="label-text">Gap (in)</span>
+      <input type="number" id="panelGap" value="0.25" min="0" max="4" step="0.0625"></label>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Panel Layout</div>
+    <div class="sub-label">Available widths</div>
+    <div class="size-toggles" id="widthToggles">
+      <button class="size-tog active" data-size="24">24" (2')</button>
+      <button class="size-tog" data-size="36">36" (3')</button>
+      <button class="size-tog active" data-size="48">48" (4')</button>
+    </div>
+    <div class="sub-label">Available heights</div>
+    <div class="size-toggles" id="heightToggles">
+      <button class="size-tog" data-size="48">48" (4')</button>
+      <button class="size-tog" data-size="60">60" (5')</button>
+      <button class="size-tog" data-size="72">72" (6')</button>
+      <button class="size-tog active" data-size="96">96" (8')</button>
+      <button class="size-tog active" data-size="120">120" (10')</button>
+      <button class="size-tog active" data-size="144">144" (12')</button>
+    </div>
+    <div class="sub-label">Layout option</div>
+    <select class="layout-select" id="layoutSelect"></select>
+    <label class="ctrl"><span class="label-text">Margin (in)</span>
+      <input type="range" id="margin" min="0" max="6" value="1" step="0.25">
+      <span class="value" id="marginVal">1</span></label>
+    <div class="layout-info" id="layoutInfo">—</div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Grid Settings</div>
+    <div class="toggle-row"><span>Spacing Mode</span>
+      <div class="preset-btns" style="margin:0">
+        <button class="preset-btn active" id="modeSpacing">Spacing</button>
+        <button class="preset-btn" id="modeCount">Count</button>
+      </div>
+    </div>
+    <div id="spacingControls">
+      <div class="row" style="align-items:center">
+        <label class="ctrl" style="flex:1"><span class="label-text">X (in)</span>
+          <input type="number" id="spacingX" value="2" min="2" max="12" step="0.05"></label>
+        <button class="lock-btn active" id="lockRatio" title="Lock ratio">&#128279;</button>
+        <label class="ctrl" style="flex:1"><span class="label-text">Y (in)</span>
+          <input type="number" id="spacingY" value="2" min="2" max="12" step="0.05"></label>
+      </div>
+    </div>
+    <div id="countControls" style="display:none">
+      <div class="row">
+        <label class="ctrl"><span class="label-text">Cols</span>
+          <input type="number" id="gridCols" value="46" min="2" max="500" step="1"></label>
+        <label class="ctrl"><span class="label-text">Rows</span>
+          <input type="number" id="gridRows" value="118" min="2" max="500" step="1"></label>
+      </div>
+    </div>
+    <div class="toggle-row" style="margin-top:4px"><span>Grid Pattern</span>
+      <div class="preset-btns" style="margin:0">
+        <button class="preset-btn active" id="patternRect">Rectangular</button>
+        <button class="preset-btn" id="patternHex">Staggered</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Hole Settings</div>
+    <div class="sub-label">Standard sizes (in)</div>
+    <div class="size-toggles" id="holeSizeToggles">
+      <button class="size-tog active" data-size="1.5">1-1/2"</button>
+      <button class="size-tog active" data-size="1.25">1-1/4"</button>
+      <button class="size-tog active" data-size="1">1"</button>
+      <button class="size-tog active" data-size="0.75">3/4"</button>
+      <button class="size-tog active" data-size="0.625">5/8"</button>
+      <button class="size-tog active" data-size="0.5">1/2"</button>
+      <button class="size-tog active" data-size="0.25">1/4"</button>
+    </div>
+    <div class="toggle-row"><span>Hole Shape</span>
+      <div class="preset-btns" style="margin:0">
+        <button class="preset-btn active" id="shapeCircle">Circle</button>
+        <button class="preset-btn" id="shapeSquare">Square</button>
+      </div>
+    </div>
+    <label class="ctrl"><span class="label-text">Threshold</span>
+      <input type="range" id="threshold" min="0" max="255" value="245" step="1">
+      <span class="value" id="thresholdVal">245</span></label>
+    <label class="ctrl"><span class="label-text">Gamma</span>
+      <input type="range" id="gamma" min="0.2" max="5" value="1" step="0.1">
+      <span class="value" id="gammaVal">1.0</span></label>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Visualization</div>
+    <label class="ctrl"><span class="label-text">Panel Color</span>
+      <input type="color" class="color-input" id="panelColor" value="#808080"></label>
+    <label class="ctrl"><span class="label-text">Background</span>
+      <input type="color" class="color-input" id="bgColor" value="#111111"></label>
+    <div class="toggle-row"><span>Backlight</span><div class="toggle active" id="backlightToggle"></div></div>
+    <label class="ctrl"><span class="label-text">Backlight Color</span>
+      <input type="color" class="color-input" id="backlightColor" value="#ffaa44"></label>
+    <label class="ctrl"><span class="label-text">Intensity</span>
+      <input type="range" id="backlightIntensity" min="0" max="2" value="1" step="0.05">
+      <span class="value" id="backlightIntensityVal">1.0</span></label>
+    <div class="toggle-row"><span>Show panel labels</span><div class="toggle active" id="showLabelsToggle"></div></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Statistics</div>
+    <div class="stats-grid">
+      <span class="stat-label">Wall Size</span><span class="stat-value" id="statWall">—</span>
+      <span class="stat-label">Panels</span><span class="stat-value" id="statPanels">—</span>
+      <span class="stat-label">Coverage</span><span class="stat-value" id="statCoverage">—</span>
+      <span class="stat-label">Total Holes</span><span class="stat-value" id="statHoles">—</span>
+      <span class="stat-label">Open Area</span><span class="stat-value" id="statOpen">—</span>
+      <span class="stat-label">Sizes Used</span><span class="stat-value" id="statSizesUsed">—</span>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Estimated Pricing</div>
+    <div class="stats-grid">
+      <span class="stat-label">Panel Area</span><span class="stat-value" id="priceArea">—</span>
+      <span class="stat-label">Rate</span><span class="stat-value">$42 / SF</span>
+      <span class="stat-label" style="font-weight:600;color:var(--text)">Estimated Total</span>
+      <span class="stat-value" style="color:var(--accent);font-size:14px" id="priceTotal">—</span>
+    </div>
+    <p style="font-size:10px;color:var(--text-dim);margin-top:8px;line-height:1.4">Panels only. Illumination, mounting hardware, and installation not included.</p>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Export</div>
+    <select class="export-select" id="exportTarget">
+      <option value="all">All Panels (Full Wall)</option>
+    </select>
+    <div class="export-btns">
+      <button class="export-btn" id="exportSVG">SVG</button>
+      <button class="export-btn" id="exportDXF">DXF</button>
+      <button class="export-btn" id="exportPNG">PNG</button>
+    </div>
+  </div>
+</div>
+
+<div id="main">
+  <div class="tabs">
+    <div class="tab active" data-tab="2d">2D Pattern</div>
+    <div class="tab" data-tab="3d">3D Preview</div>
+    <div class="tab" data-tab="guide">Guide</div>
+  </div>
+  <div id="viewport">
+    <canvas id="canvas2d"></canvas>
+    <div id="container3d"></div>
+    <div class="zoom-info" id="zoomInfo">100%</div>
+    <div class="no-image-msg" id="noImageMsg">
+      <div style="font-size:32px;margin-bottom:8px;">&#9678;</div>
+      Drop an image on the sidebar to begin
+      <p>Supports JPG, PNG, WebP</p>
+    </div>
+
+    <div id="guidePanel">
+      <div class="guide-content">
+        <h2>How It Works</h2>
+        <p>This tool converts a source image into a <strong>perforated panel design</strong> — a pattern of precisely sized and spaced holes that recreate the image when the panel is backlit. Darker areas of the image get larger holes (more light passes through), lighter areas get smaller holes or no holes at all. The result is an architectural feature wall made from standard sheet metal panels that can be CNC-punched or laser-cut.</p>
+
+        <h2>Step-by-Step Workflow</h2>
+
+        <div class="step-row"><span class="step-num">1</span>
+          <p><strong>Upload a source image.</strong> Drag and drop (or click to browse) in the <span class="section-ref">Source Image</span> area. High-contrast images with clear subjects work best. Grayscale or black-and-white images give the most predictable results.</p></div>
+
+        <div class="step-row"><span class="step-num">2</span>
+          <p><strong>Set your wall dimensions.</strong> Enter the total wall width and height in feet under <span class="section-ref">Wall Dimensions</span>. Set the gap between panels (typically 1/4" for metal panel installations).</p></div>
+
+        <div class="step-row"><span class="step-num">3</span>
+          <p><strong>Choose panel sizes.</strong> Under <span class="section-ref">Panel Layout</span>, toggle which standard panel widths and heights are available for your project. The solver will find the best combination to fill the wall. Select a layout from the dropdown.</p></div>
+
+        <div class="step-row"><span class="step-num">4</span>
+          <p><strong>Adjust image settings.</strong> Use <span class="section-ref">Image Adjustments</span> (brightness, contrast, invert) to optimize the image for perforation. Increasing contrast sharpens the tonal range. Invert flips dark and light.</p></div>
+
+        <div class="step-row"><span class="step-num">5</span>
+          <p><strong>Configure grid and holes.</strong> Set hole spacing, pattern, sizes, threshold, and gamma under <span class="section-ref">Grid Settings</span> and <span class="section-ref">Hole Settings</span> (see details below).</p></div>
+
+        <div class="step-row"><span class="step-num">6</span>
+          <p><strong>Preview and export.</strong> Review the design in <strong>2D Pattern</strong> or <strong>3D Preview</strong>, then export individual panels or the full wall as SVG (for CNC/laser), DXF (for CAD), or PNG (for presentations).</p></div>
+
+        <h2>Panel Layout — How It Works</h2>
+        <p>The solver takes your wall dimensions and the enabled standard panel sizes, then finds every valid combination that fills the wall. Results are ranked by:</p>
+        <ul>
+          <li><strong>Coverage</strong> — how much of the wall area is covered (higher is better)</li>
+          <li><strong>Fewer distinct sizes</strong> — using fewer different sizes simplifies fabrication and ordering</li>
+          <li><strong>Fewer total panels</strong> — fewer panels means less installation labor and fewer seams</li>
+        </ul>
+        <p>Panels are arranged with <strong>smaller sizes on the edges</strong> and larger panels in the center. This keeps the visual weight centered and puts partial-width cuts at the perimeter where they're less visible.</p>
+
+        <h3>Available Widths</h3>
+        <p>Toggle which sheet widths your fabricator can supply. Common choices:</p>
+        <ul>
+          <li><strong>48" (4')</strong> — Standard full sheet width. Most cost-effective. Use for the bulk of the wall.</li>
+          <li><strong>36" (3')</strong> — Less common. Use when 4' panels don't divide evenly.</li>
+          <li><strong>24" (2')</strong> — Half-width panel. Ideal for filling edge gaps so you don't need irregular cuts.</li>
+        </ul>
+
+        <h3>Available Heights</h3>
+        <p>Toggle which sheet heights are available. Heights can be <strong>stacked vertically</strong> to reach tall walls:</p>
+        <ul>
+          <li><strong>48" (4')</strong> — Short panel, useful as a filler row</li>
+          <li><strong>60" (5')</strong> — Works well paired with other sizes</li>
+          <li><strong>72" (6')</strong> — Half of 12'</li>
+          <li><strong>96" (8')</strong> — Standard sheet. Widely available.</li>
+          <li><strong>120" (10')</strong> — Common extended sheet length</li>
+          <li><strong>144" (12')</strong> — Maximum standard sheet. Reduces horizontal seams.</li>
+        </ul>
+        <div class="tip">Example: An 18' tall wall can use 8' + 10' (96" + 120"), or 6' + 12' (72" + 144"). Enable the sizes you want and the solver finds the best fit.</div>
+
+        <h2>Controls Reference</h2>
+
+        <h3>Image Adjustments</h3>
+        <ul>
+          <li><strong>Brightness</strong> — Shifts overall lightness. Increase to reduce the number of holes (lighter = fewer/smaller holes). Decrease to add more holes in lighter areas.</li>
+          <li><strong>Contrast</strong> — Widens or narrows the tonal range. Higher contrast creates a sharper distinction between large and small holes, giving a more graphic look. Lower contrast produces more uniform hole sizes.</li>
+          <li><strong>Invert</strong> — Flips light and dark. Use when your source image has the wrong polarity (e.g., white subject on dark background).</li>
+        </ul>
+
+        <h3>Grid Settings</h3>
+        <ul>
+          <li><strong>Spacing Mode</strong> — Set hole positions by physical spacing (inches between hole centers) or by count (number of columns and rows per panel).</li>
+          <li><strong>X / Y Spacing</strong> — Distance between hole centers. Smaller spacing = more holes = finer image detail, but longer CNC run time and more material removed. Lock ratio keeps X and Y equal for uniform grids.</li>
+          <li><strong>Grid Pattern</strong> — <em>Rectangular</em> aligns holes in a straight grid. <em>Staggered</em> offsets every other row by half a spacing, producing a honeycomb-like pattern with better visual blending.</li>
+        </ul>
+        <div class="warn"><strong>Minimum 2" center-to-center spacing is enforced.</strong> Closer spacing compromises the structural integrity of the panel — the material between holes (ligaments) becomes too thin and the sheet can deform or tear during handling and installation.</div>
+
+        <h3>Hole Settings</h3>
+        <ul>
+          <li><strong>Standard Sizes</strong> — Toggle which drill/punch sizes are available. Every computed hole snaps to the nearest enabled size. This is critical for production — CNC punch presses use fixed tooling, so all holes must match a tool in the machine's turret.</li>
+          <li><strong>Hole Shape</strong> — Circle or square. Circles are standard for perforated panels. Squares can create a different visual texture.</li>
+          <li><strong>Threshold</strong> — Brightness cutoff. Pixels brighter than this value get no hole at all. Lower threshold = fewer holes (only the darkest areas). Higher threshold = more holes across wider tonal range.</li>
+          <li><strong>Gamma</strong> — Controls the brightness-to-size mapping curve. Gamma &lt; 1 pushes more holes toward larger sizes (darker result). Gamma &gt; 1 pushes more holes toward smaller sizes (lighter, more subtle result). Gamma = 1 is linear.</li>
+        </ul>
+        <div class="tip"><strong>Production impact of hole sizes:</strong> Fewer enabled sizes = fewer tool changes on the CNC = faster and cheaper fabrication. However, fewer sizes means less tonal gradation in the image. 3-4 sizes is a good balance between image quality and production efficiency.</div>
+
+        <h3>Visualization</h3>
+        <ul>
+          <li><strong>Panel Color</strong> — Simulates the panel material color (aluminum, steel, painted finish).</li>
+          <li><strong>Background Color</strong> — Color behind the panel in the viewer.</li>
+          <li><strong>Backlight</strong> — Simulates the light source behind the panel. The warm amber default mimics typical LED backlighting. Toggle off to see the panel without illumination.</li>
+          <li><strong>Intensity</strong> — Brightness of the backlight simulation.</li>
+          <li><strong>Show Panel Labels</strong> — Displays panel IDs (A1, B2, etc.) and dimensions on each panel for reference during fabrication and installation.</li>
+        </ul>
+
+        <h3>Margin</h3>
+        <p>The clear zone around the edge of each panel where no holes are placed. This area is needed for panel mounting hardware (clips, fasteners, z-channels). Typically 1" minimum. Increase if your mounting system requires more clearance.</p>
+
+        <h2>Export Formats</h2>
+        <ul>
+          <li><strong>SVG</strong> — Vector file with real-world inch dimensions. Use for CNC programming, laser cutting, or importing into CAD software. Each panel is a separate group. Hole positions and diameters are exact.</li>
+          <li><strong>DXF</strong> — AutoCAD-compatible format (R12). Panel outlines on the PANEL layer, holes on the HOLES layer. Coordinates in inches. Ready for direct CNC import.</li>
+          <li><strong>PNG</strong> — Raster screenshot of the current view (2D or 3D). Use for client presentations, submittals, and approval drawings.</li>
+        </ul>
+        <div class="tip">You can export individual panels or the full wall using the dropdown above the export buttons. Individual panel exports place the panel at the origin (0,0) — ready to send directly to the CNC operator.</div>
+
+        <h2>Production Considerations</h2>
+        <ul>
+          <li><strong>Material</strong> — Typically 16-gauge (0.060") or 14-gauge (0.075") aluminum or steel. Thicker gauges allow closer hole spacing without structural issues.</li>
+          <li><strong>Hole spacing vs. strength</strong> — The 2" minimum spacing maintains structural rigidity. For panels that span long distances without support, consider wider spacing.</li>
+          <li><strong>Panel labeling</strong> — Each panel is labeled (A1, A2, B1...) with row letters and column numbers. Use these labels on shop drawings, crating, and during field installation to ensure correct placement.</li>
+          <li><strong>Image orientation</strong> — The image maps across the entire wall surface. Each panel gets the portion of the image that falls within its boundary. Panels must be installed in the correct position and orientation for the image to read correctly.</li>
+          <li><strong>Finishing</strong> — Panels are typically powder-coated after perforation. Ensure the coating specification accounts for hole edge quality (deburring may be required before coating).</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ─── State ───────────────────────────────────────────────────────────
+const state = {
+  sourceImage: null, grayPixels: null, imgWidth: 0, imgHeight: 0,
+  brightness: 0, contrast: 0, invert: false,
+  wallW: 240, wallH: 120, panelGap: 0.25,
+  enabledWidths: [24, 48],
+  enabledHeights: [96, 120, 144],
+  margin: 1,
+  spacingMode: 'spacing', spacingX: 2, spacingY: 2, lockRatio: true,
+  minSpacing: 2,
+  gridCols: 46, gridRows: 118, gridPattern: 'rect',
+  standardHoleSizes: [1.5, 1.25, 1.0, 0.75, 0.625, 0.5, 0.25],
+  enabledHoleSizes: [1.5, 1.25, 1.0, 0.75, 0.625, 0.5, 0.25],
+  holeShape: 'circle',
+  threshold: 245, gamma: 1.0,
+  panelColor: '#808080', bgColor: '#111111',
+  backlight: true, backlightColor: '#ffaa44', backlightIntensity: 1.0,
+  showLabels: true, activeTab: '2d',
+  // computed
+  layoutOptions: [],
+  selectedLayoutIdx: 0,
+  colWidths: [], rowHeights: [],
+  panels: [], gridInfo: { cols: 0, rows: 0 },
+};
+
+const $ = id => document.getElementById(id);
+const dropzone = $('dropzone'), fileInput = $('fileInput'), clearBtn = $('clearBtn');
+const canvas2d = $('canvas2d'), ctx = canvas2d.getContext('2d');
+const container3d = $('container3d'), zoomInfo = $('zoomInfo'), noImageMsg = $('noImageMsg');
+
+let camX = 0, camY = 0, camZoom = 1;
+let isPanning = false, panStartX = 0, panStartY = 0, panCamX = 0, panCamY = 0;
+let renderer3d, scene3d, camera3d, controls3d, wallGroup;
+let three_initialized = false, needs3dUpdate = true;
+
+let updateTimer = null;
+function scheduleUpdate() {
+  if (updateTimer) cancelAnimationFrame(updateTimer);
+  updateTimer = requestAnimationFrame(() => {
+    solveAndApplyLayout();
+    computeAllHoles();
+    render2d();
+    needs3dUpdate = true;
+    updateStats();
+    updateExportSelect();
+  });
+}
+
+// ─── Image Upload ────────────────────────────────────────────────────
+dropzone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => { if (e.target.files[0]) loadImage(e.target.files[0]); });
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault(); dropzone.classList.remove('dragover');
+  const f = e.dataTransfer.files[0];
+  if (f && f.type.startsWith('image/')) loadImage(f);
+});
+clearBtn.addEventListener('click', e => {
+  e.stopPropagation(); state.sourceImage = null; state.grayPixels = null; state.panels = [];
+  dropzone.classList.remove('has-image');
+  dropzone.querySelector('img')?.remove();
+  dropzone.querySelector('p').style.display = '';
+  noImageMsg.style.display = '';
+  render2d(); needs3dUpdate = true; updateStats();
+});
+
+function loadImage(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      state.sourceImage = img;
+      dropzone.querySelector('img')?.remove();
+      const prev = document.createElement('img');
+      prev.src = e.target.result;
+      dropzone.querySelector('p').style.display = 'none';
+      dropzone.insertBefore(prev, clearBtn);
+      dropzone.classList.add('has-image');
+      noImageMsg.style.display = 'none';
+      processImage(); resetView(); scheduleUpdate();
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ─── Image Processing ────────────────────────────────────────────────
+function processImage() {
+  const img = state.sourceImage;
+  if (!img) return;
+  const c = document.createElement('canvas');
+  c.width = img.naturalWidth; c.height = img.naturalHeight;
+  const cx = c.getContext('2d');
+  cx.drawImage(img, 0, 0);
+  const data = cx.getImageData(0, 0, c.width, c.height), px = data.data;
+  const gray = new Float32Array(c.width * c.height);
+  const br = state.brightness / 100, co = state.contrast / 100;
+  const cf = (1 + co) / (1 - co + 0.001);
+  for (let i = 0; i < gray.length; i++) {
+    const idx = i * 4;
+    let v = (px[idx] * 0.299 + px[idx+1] * 0.587 + px[idx+2] * 0.114) / 255;
+    v = (v + br - 0.5) * cf + 0.5;
+    if (state.invert) v = 1 - v;
+    gray[i] = Math.max(0, Math.min(1, v));
+  }
+  state.grayPixels = gray; state.imgWidth = c.width; state.imgHeight = c.height;
+}
+
+function sampleImage(u, v) {
+  const g = state.grayPixels;
+  if (!g) return 1;
+  const w = state.imgWidth, h = state.imgHeight;
+  const fx = Math.max(0, Math.min(1, u)) * (w - 1), fy = Math.max(0, Math.min(1, v)) * (h - 1);
+  const x0 = Math.floor(fx), y0 = Math.floor(fy);
+  const x1 = Math.min(x0+1, w-1), y1 = Math.min(y0+1, h-1);
+  const dx = fx - x0, dy = fy - y0;
+  return g[y0*w+x0]*(1-dx)*(1-dy) + g[y0*w+x1]*dx*(1-dy) + g[y1*w+x0]*(1-dx)*dy + g[y1*w+x1]*dx*dy;
+}
+
+// ─── Layout Solver ───────────────────────────────────────────────────
+function solveAxis(wallDim, gap, sizes) {
+  if (!sizes.length) return [];
+  const sorted = sizes.slice().sort((a, b) => b - a);
+  const results = [];
+
+  function recurse(idx, totalDim, numPanels, counts) {
+    const totalWithGaps = totalDim + Math.max(0, numPanels - 1) * gap;
+    if (totalWithGaps > wallDim + gap + 0.01) return;
+    if (numPanels > 0) {
+      results.push({ counts: {...counts}, total: totalWithGaps,
+        coverage: totalWithGaps / wallDim, numPanels });
+    }
+    if (idx >= sorted.length) return;
+    const size = sorted[idx];
+    const maxN = Math.floor((wallDim - totalWithGaps + gap) / (size + (numPanels > 0 ? gap : 0)));
+    for (let n = 0; n <= Math.min(maxN, 30); n++) {
+      counts[size] = (counts[size] || 0) + n;
+      recurse(idx + 1, totalDim + n * size, numPanels + n, counts);
+      counts[size] -= n;
+      if (counts[size] === 0) delete counts[size];
+    }
+  }
+  recurse(0, 0, 0, {});
+
+  // score: prefer high coverage, fewer panels, fewer distinct sizes
+  results.sort((a, b) => {
+    const cd = b.coverage - a.coverage;
+    if (Math.abs(cd) > 0.003) return cd;
+    const distinct = Object.keys(a.counts).length - Object.keys(b.counts).length;
+    if (distinct !== 0) return distinct;
+    return a.numPanels - b.numPanels;
+  });
+
+  // deduplicate
+  const seen = new Set(), unique = [];
+  for (const r of results) {
+    const key = Object.entries(r.counts).sort(([a],[b]) => a-b).map(([k,v]) => `${k}:${v}`).join(',');
+    if (!seen.has(key)) { seen.add(key); unique.push(r); }
+  }
+  return unique.slice(0, 12);
+}
+
+function arrangeAxis(counts) {
+  // Build array with smaller panels on edges, larger in middle
+  const entries = Object.entries(counts).map(([k,v]) => [parseInt(k), v]).sort(([a],[b]) => a - b);
+  const all = [];
+  for (const [size, count] of entries) for (let i = 0; i < count; i++) all.push(size);
+  if (all.length <= 2) return all;
+
+  const largest = Math.max(...all);
+  const edges = all.filter(p => p < largest);
+  const middles = all.filter(p => p === largest);
+  const leftEdge = edges.slice(0, Math.ceil(edges.length / 2));
+  const rightEdge = edges.slice(Math.ceil(edges.length / 2));
+  return [...leftEdge, ...middles, ...rightEdge];
+}
+
+function describeCounts(counts) {
+  const entries = Object.entries(counts).map(([k,v]) => [parseInt(k), v]).sort(([a],[b]) => a - b);
+  return entries.map(([s, n]) => n === 1 ? `${s}"` : `${n}x${s}"`).join(' + ');
+}
+
+function solveAndApplyLayout() {
+  const wSolutions = solveAxis(state.wallW, state.panelGap, state.enabledWidths);
+  const hSolutions = solveAxis(state.wallH, state.panelGap, state.enabledHeights);
+
+  if (!wSolutions.length || !hSolutions.length) {
+    state.layoutOptions = []; state.panels = []; state.colWidths = []; state.rowHeights = [];
+    updateLayoutSelect(); updateLayoutInfo(); return;
+  }
+
+  // combine top W options with top H options
+  const combos = [];
+  const maxW = Math.min(wSolutions.length, 6), maxH = Math.min(hSolutions.length, 6);
+  for (let wi = 0; wi < maxW; wi++) {
+    for (let hi = 0; hi < maxH; hi++) {
+      const w = wSolutions[wi], h = hSolutions[hi];
+      const totalCoverage = (w.coverage + h.coverage) / 2;
+      const totalPanels = w.numPanels * h.numPanels;
+      combos.push({ w, h, totalCoverage, totalPanels,
+        desc: `W: ${describeCounts(w.counts)} | H: ${describeCounts(h.counts)}`
+      });
+    }
+  }
+
+  combos.sort((a, b) => {
+    const cd = b.totalCoverage - a.totalCoverage;
+    if (Math.abs(cd) > 0.003) return cd;
+    return a.totalPanels - b.totalPanels;
+  });
+
+  state.layoutOptions = combos.slice(0, 15);
+
+  // clamp selected index
+  if (state.selectedLayoutIdx >= state.layoutOptions.length) state.selectedLayoutIdx = 0;
+
+  updateLayoutSelect();
+  applySelectedLayout();
+}
+
+function applySelectedLayout() {
+  if (!state.layoutOptions.length) {
+    state.panels = []; state.colWidths = []; state.rowHeights = [];
+    updateLayoutInfo(); return;
+  }
+
+  const opt = state.layoutOptions[state.selectedLayoutIdx];
+  const colWidths = arrangeAxis(opt.w.counts);
+  const rowHeights = arrangeAxis(opt.h.counts);
+  state.colWidths = colWidths;
+  state.rowHeights = rowHeights;
+
+  const gap = state.panelGap;
+  const totalW = colWidths.reduce((s,v) => s+v, 0) + (colWidths.length - 1) * gap;
+  const totalH = rowHeights.reduce((s,v) => s+v, 0) + (rowHeights.length - 1) * gap;
+  const offsetX = (state.wallW - totalW) / 2;
+  const offsetY = (state.wallH - totalH) / 2;
+
+  const panels = [];
+  let yPos = offsetY;
+  for (let r = 0; r < rowHeights.length; r++) {
+    let xPos = offsetX;
+    for (let c = 0; c < colWidths.length; c++) {
+      const pw = colWidths[c], ph = rowHeights[r];
+      panels.push({
+        x: xPos, y: yPos, w: pw, h: ph, col: c, row: r,
+        label: `${String.fromCharCode(65 + r)}${c + 1}`,
+        sizeLabel: `${pw}"x${ph}"`,
+        holes: [],
+      });
+      xPos += pw + gap;
+    }
+    yPos += rowHeights[r] + gap;
+  }
+  state.panels = panels;
+  updateLayoutInfo();
+}
+
+function updateLayoutSelect() {
+  const sel = $('layoutSelect');
+  sel.innerHTML = '';
+  state.layoutOptions.forEach((opt, i) => {
+    const o = document.createElement('option');
+    o.value = i;
+    const pct = (opt.totalCoverage * 100).toFixed(1);
+    o.textContent = `${opt.desc} — ${opt.totalPanels} panels, ${pct}%`;
+    sel.appendChild(o);
+  });
+  sel.value = state.selectedLayoutIdx;
+}
+
+function updateLayoutInfo() {
+  const el = $('layoutInfo');
+  if (!state.layoutOptions.length || !state.panels.length) {
+    el.innerHTML = '<span class="li-accent">No valid layout found.</span> Enable more sizes.';
+    return;
+  }
+  const opt = state.layoutOptions[state.selectedLayoutIdx];
+  const cw = state.colWidths, rh = state.rowHeights;
+  const colStr = cw.map(w => `${w}"`).join(' | ');
+  const rowStr = rh.map(h => `${h}"`).join(' | ');
+  const pct = (opt.totalCoverage * 100).toFixed(1);
+  const wasteW = state.wallW - opt.w.total;
+  const wasteH = state.wallH - opt.h.total;
+
+  el.innerHTML =
+    `<span class="li-label">Cols:</span> ${colStr}<br>` +
+    `<span class="li-label">Rows:</span> ${rowStr}<br>` +
+    `<span class="li-accent">${cw.length} x ${rh.length} = ${state.panels.length} panels</span><br>` +
+    `<span class="li-label">Coverage:</span> ${pct}%` +
+    (wasteW > 0.1 || wasteH > 0.1 ? ` <span class="li-label">(gap: ${wasteW.toFixed(1)}"W, ${wasteH.toFixed(1)}"H)</span>` : '');
+}
+
+// ─── Hole Computation ────────────────────────────────────────────────
+function computeAllHoles() {
+  if (!state.grayPixels) {
+    state.panels.forEach(p => p.holes = []);
+    state.gridInfo = { cols: 0, rows: 0 }; return;
+  }
+  const wW = state.wallW, wH = state.wallH, m = state.margin;
+  const thresh = state.threshold / 255, gam = state.gamma;
+  const sizes = state.enabledHoleSizes.slice().sort((a,b) => a - b);
+  if (!sizes.length) { state.panels.forEach(p => p.holes = []); state.gridInfo = { cols: 0, rows: 0 }; return; }
+  const minD = sizes[0], maxD = sizes[sizes.length - 1];
+
+  for (const panel of state.panels) {
+    const pW = panel.w, pH = panel.h;
+    const areaW = pW - 2*m, areaH = pH - 2*m;
+    if (areaW <= 0 || areaH <= 0) { panel.holes = []; continue; }
+
+    let cols, rows;
+    const minSp = state.minSpacing;
+    if (state.spacingMode === 'spacing') {
+      const sx = Math.max(minSp, state.spacingX);
+      const sy = Math.max(minSp, state.spacingY);
+      cols = Math.max(1, Math.floor(areaW / sx) + 1);
+      rows = Math.max(1, Math.floor(areaH / sy) + 1);
+    } else {
+      // scale count proportionally, then clamp to min spacing
+      const refW = Math.max(...state.colWidths) || 48;
+      const refH = Math.max(...state.rowHeights) || 120;
+      cols = Math.max(1, Math.round(state.gridCols * (areaW / (refW - 2*m))));
+      rows = Math.max(1, Math.round(state.gridRows * (areaH / (refH - 2*m))));
+      // clamp so spacing stays >= minSpacing
+      const maxCols = Math.floor(areaW / minSp) + 1;
+      const maxRows = Math.floor(areaH / minSp) + 1;
+      cols = Math.min(cols, maxCols);
+      rows = Math.min(rows, maxRows);
+    }
+    state.gridInfo = { cols, rows };
+    const holes = [];
+
+    for (let r = 0; r < rows; r++) {
+      const isOdd = r % 2 === 1;
+      const cCols = (state.gridPattern === 'hex' && isOdd) ? cols - 1 : cols;
+      const sx = cols > 1 ? areaW / (cols - 1) : 0;
+      const xOff = (state.gridPattern === 'hex' && isOdd) ? sx * 0.5 : 0;
+      for (let c = 0; c < cCols; c++) {
+        const lx = m + (cols > 1 ? c * (areaW / (cols - 1)) : areaW/2) + xOff;
+        const ly = m + (rows > 1 ? r * (areaH / (rows - 1)) : areaH/2);
+        if (lx < 0 || lx > pW || ly < 0 || ly > pH) continue;
+        const u = (panel.x + lx) / wW, v = (panel.y + ly) / wH;
+        const brightness = sampleImage(u, v);
+        if (brightness > thresh) continue;
+        let t = Math.pow(Math.max(0, Math.min(1, 1 - brightness / thresh)), gam);
+        const rawDiam = minD + t * (maxD - minD);
+        // snap to nearest standard size
+        let bestSize = sizes[0], bestDist = Math.abs(rawDiam - sizes[0]);
+        for (let si = 1; si < sizes.length; si++) {
+          const dist = Math.abs(rawDiam - sizes[si]);
+          if (dist < bestDist) { bestDist = dist; bestSize = sizes[si]; }
+        }
+        holes.push({ x: lx, y: ly, d: bestSize });
+      }
+    }
+    panel.holes = holes;
+  }
+}
+
+// ─── 2D Renderer ─────────────────────────────────────────────────────
+function resizeCanvas() {
+  const vp = $('viewport');
+  canvas2d.width = vp.clientWidth; canvas2d.height = vp.clientHeight;
+}
+function resetView() {
+  const vp = $('viewport');
+  // extra padding for dimension lines on left and top
+  const padL = 60, padT = 50, padR = 20, padB = 20;
+  const availW = vp.clientWidth - padL - padR;
+  const availH = vp.clientHeight - padT - padB;
+  const scaleX = availW / state.wallW;
+  const scaleY = availH / state.wallH;
+  camZoom = Math.min(scaleX, scaleY);
+  camX = padL + (availW / 2) - (state.wallW / 2) * camZoom;
+  camY = padT + (availH / 2) - (state.wallH / 2) * camZoom;
+  zoomInfo.textContent = Math.round(camZoom * 100) + '%';
+}
+
+function render2d() {
+  if (state.activeTab !== '2d') return;
+  resizeCanvas();
+  const w = canvas2d.width, h = canvas2d.height;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = state.bgColor;
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.save();
+  ctx.translate(camX, camY);
+  ctx.scale(camZoom, camZoom);
+  const wW = state.wallW, wH = state.wallH;
+
+  if (state.backlight) {
+    const bl = hexToRgb(state.backlightColor), int = state.backlightIntensity;
+    const pad = Math.max(wW, wH) * 0.03;
+    const grad = ctx.createRadialGradient(wW/2, wH/2, 0, wW/2, wH/2, Math.max(wW,wH)*0.6);
+    grad.addColorStop(0, `rgba(${bl.r},${bl.g},${bl.b},${0.4*int})`);
+    grad.addColorStop(1, `rgba(${bl.r},${bl.g},${bl.b},0)`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(-pad, -pad, wW+pad*2, wH+pad*2);
+  }
+
+  const blColor = state.backlight ? state.backlightColor : state.bgColor;
+
+  for (const panel of state.panels) {
+    ctx.save();
+    ctx.translate(panel.x, panel.y);
+    ctx.fillStyle = state.panelColor;
+    ctx.fillRect(0, 0, panel.w, panel.h);
+
+    const holes = panel.holes;
+    if (state.holeShape === 'circle') {
+      ctx.fillStyle = blColor;
+      ctx.beginPath();
+      for (const hole of holes) {
+        const r = hole.d / 2;
+        ctx.moveTo(hole.x + r, hole.y);
+        ctx.arc(hole.x, hole.y, r, 0, Math.PI * 2);
+      }
+      ctx.fill();
+    } else {
+      ctx.fillStyle = blColor;
+      for (const hole of holes) {
+        const half = hole.d / 2;
+        ctx.fillRect(hole.x - half, hole.y - half, hole.d, hole.d);
+      }
+    }
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = 1.5 / camZoom;
+    ctx.strokeRect(0, 0, panel.w, panel.h);
+
+    if (state.showLabels) {
+      const fs = Math.min(panel.w, panel.h) * 0.07;
+      ctx.font = `bold ${fs}px sans-serif`;
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(panel.label, panel.w / 2, panel.h / 2 - fs * 0.6);
+      ctx.font = `${fs * 0.6}px sans-serif`;
+      ctx.fillStyle = 'rgba(255,255,255,0.2)';
+      ctx.fillText(panel.sizeLabel, panel.w / 2, panel.h / 2 + fs * 0.5);
+    }
+    ctx.restore();
+  }
+
+  ctx.setLineDash([4/camZoom, 4/camZoom]);
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  ctx.lineWidth = 1 / camZoom;
+  ctx.strokeRect(0, 0, wW, wH);
+  ctx.setLineDash([]);
+
+  // ─── Dimension Lines ────────────────────────────────────────────
+  if (state.panels.length) {
+    const lw = 1 / camZoom;
+    const tick = 6 / camZoom;
+    const dimOffset = 18 / camZoom;
+    const fontSize = Math.max(4, 4 / camZoom);
+    const dimColor = 'rgba(255,255,255,0.55)';
+    const dimTextColor = 'rgba(255,255,255,0.75)';
+    ctx.strokeStyle = dimColor; ctx.lineWidth = lw; ctx.setLineDash([]);
+
+    // helper: format inches as ft'-in" or just inches
+    function fmtDim(inches) {
+      const ft = Math.floor(inches / 12);
+      const rem = inches - ft * 12;
+      if (ft === 0) return `${rem % 1 === 0 ? rem : rem.toFixed(1)}"`;
+      if (Math.abs(rem) < 0.05) return `${ft}'`;
+      return `${ft}'-${rem % 1 === 0 ? rem : rem.toFixed(1)}"`;
+    }
+
+    // total finished area
+    const cw = state.colWidths, rh = state.rowHeights;
+    const gap = state.panelGap;
+    const totalW = cw.reduce((s,v)=>s+v,0) + (cw.length-1)*gap;
+    const totalH = rh.reduce((s,v)=>s+v,0) + (rh.length-1)*gap;
+    const ox = (wW - totalW) / 2;
+    const oy = (wH - totalH) / 2;
+
+    // ── top: overall width ──
+    const topY = oy - dimOffset * 2.8;
+    ctx.beginPath(); ctx.moveTo(ox, topY); ctx.lineTo(ox + totalW, topY); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(ox, topY - tick); ctx.lineTo(ox, topY + tick); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(ox + totalW, topY - tick); ctx.lineTo(ox + totalW, topY + tick); ctx.stroke();
+    ctx.font = `bold ${fontSize * 1.1}px sans-serif`; ctx.fillStyle = dimTextColor;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    ctx.fillText(fmtDim(totalW), ox + totalW / 2, topY - tick * 0.5);
+
+    // ── top: per-column widths ──
+    const colDimY = oy - dimOffset;
+    let cx = ox;
+    for (let i = 0; i < cw.length; i++) {
+      const pw = cw[i];
+      ctx.beginPath(); ctx.moveTo(cx, colDimY); ctx.lineTo(cx + pw, colDimY); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx, colDimY - tick*0.7); ctx.lineTo(cx, colDimY + tick*0.7); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx + pw, colDimY - tick*0.7); ctx.lineTo(cx + pw, colDimY + tick*0.7); ctx.stroke();
+      ctx.font = `${fontSize * 0.9}px sans-serif`; ctx.fillStyle = dimColor;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.fillText(fmtDim(pw), cx + pw / 2, colDimY - tick * 0.3);
+      cx += pw + gap;
+    }
+
+    // ── left: overall height ──
+    const leftX = ox - dimOffset * 2.8;
+    ctx.beginPath(); ctx.moveTo(leftX, oy); ctx.lineTo(leftX, oy + totalH); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(leftX - tick, oy); ctx.lineTo(leftX + tick, oy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(leftX - tick, oy + totalH); ctx.lineTo(leftX + tick, oy + totalH); ctx.stroke();
+    ctx.save();
+    ctx.translate(leftX - tick * 0.5, oy + totalH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.font = `bold ${fontSize * 1.1}px sans-serif`; ctx.fillStyle = dimTextColor;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    ctx.fillText(fmtDim(totalH), 0, 0);
+    ctx.restore();
+
+    // ── left: per-row heights ──
+    const rowDimX = ox - dimOffset;
+    let cy2 = oy;
+    for (let i = 0; i < rh.length; i++) {
+      const ph = rh[i];
+      ctx.beginPath(); ctx.moveTo(rowDimX, cy2); ctx.lineTo(rowDimX, cy2 + ph); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(rowDimX - tick*0.7, cy2); ctx.lineTo(rowDimX + tick*0.7, cy2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(rowDimX - tick*0.7, cy2 + ph); ctx.lineTo(rowDimX + tick*0.7, cy2 + ph); ctx.stroke();
+      ctx.save();
+      ctx.translate(rowDimX - tick * 0.3, cy2 + ph / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.font = `${fontSize * 0.9}px sans-serif`; ctx.fillStyle = dimColor;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.fillText(fmtDim(ph), 0, 0);
+      ctx.restore();
+      cy2 += ph + gap;
+    }
+  }
+
+  ctx.restore();
+  drawScaleBar(w, h);
+}
+
+function drawScaleBar(w, h) {
+  const niceSteps = [0.5,1,2,3,4,5,6,10,12,24,48,96];
+  let best = niceSteps[0];
+  for (const s of niceSteps)
+    if (Math.abs(s*camZoom-100) < Math.abs(best*camZoom-100)) best = s;
+  const barPx = best * camZoom;
+  const x = w - barPx - 20, y = h - 30;
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.fillRect(x, y, barPx, 3);
+  ctx.fillRect(x, y-4, 1, 11);
+  ctx.fillRect(x+barPx, y-4, 1, 11);
+  ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText(best+'"', x+barPx/2, y-6);
+}
+
+canvas2d.addEventListener('wheel', e => {
+  e.preventDefault();
+  const rect = canvas2d.getBoundingClientRect();
+  const mx = e.clientX-rect.left, my = e.clientY-rect.top;
+  const factor = e.deltaY > 0 ? 0.9 : 1.1;
+  const nz = Math.max(0.05, Math.min(200, camZoom * factor));
+  camX = mx - (mx - camX) * (nz / camZoom);
+  camY = my - (my - camY) * (nz / camZoom);
+  camZoom = nz;
+  zoomInfo.textContent = Math.round(camZoom*100)+'%';
+  render2d();
+}, { passive: false });
+
+canvas2d.addEventListener('mousedown', e => {
+  isPanning = true; panStartX = e.clientX; panStartY = e.clientY;
+  panCamX = camX; panCamY = camY;
+});
+window.addEventListener('mousemove', e => {
+  if (!isPanning) return;
+  camX = panCamX + (e.clientX - panStartX);
+  camY = panCamY + (e.clientY - panStartY);
+  render2d();
+});
+window.addEventListener('mouseup', () => { isPanning = false; });
+
+// ─── 3D Renderer ─────────────────────────────────────────────────────
+function init3d() {
+  if (three_initialized) return;
+  three_initialized = true;
+  renderer3d = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer3d.setPixelRatio(window.devicePixelRatio);
+  renderer3d.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer3d.toneMappingExposure = 1.2;
+  container3d.appendChild(renderer3d.domElement);
+  scene3d = new THREE.Scene();
+  scene3d.background = new THREE.Color(0x111111);
+  camera3d = new THREE.PerspectiveCamera(45, 1, 0.1, 2000);
+  camera3d.position.set(0, 0, 100);
+  controls3d = new OrbitControls(camera3d, renderer3d.domElement);
+  controls3d.enableDamping = true; controls3d.dampingFactor = 0.08;
+  scene3d.add(new THREE.AmbientLight(0xffffff, 0.4));
+  const dl = new THREE.DirectionalLight(0xffffff, 0.8);
+  dl.position.set(20, 30, 40); scene3d.add(dl);
+  resize3d(); animate3d();
+}
+function resize3d() {
+  if (!renderer3d) return;
+  const vp = $('viewport');
+  renderer3d.setSize(vp.clientWidth, vp.clientHeight);
+  camera3d.aspect = vp.clientWidth / vp.clientHeight;
+  camera3d.updateProjectionMatrix();
+}
+function buildWallMesh() {
+  if (wallGroup) {
+    wallGroup.traverse(ch => {
+      if (ch.isMesh) { ch.geometry.dispose(); ch.material.dispose(); if (ch.material.alphaMap) ch.material.alphaMap.dispose(); }
+    });
+    scene3d.remove(wallGroup);
+  }
+  wallGroup = new THREE.Group();
+  const wW = state.wallW, wH = state.wallH;
+  const scale = 80 / Math.max(wW, wH);
+  const texSize = state.panels.length > 20 ? 512 : 1024;
+
+  for (const panel of state.panels) {
+    const pw = panel.w, ph = panel.h;
+    const tc = document.createElement('canvas');
+    tc.width = texSize; tc.height = texSize;
+    const tcx = tc.getContext('2d');
+    tcx.fillStyle = '#ffffff'; tcx.fillRect(0, 0, texSize, texSize);
+    tcx.fillStyle = '#000000';
+    for (const hole of panel.holes) {
+      const px = (hole.x / pw) * texSize, py = (hole.y / ph) * texSize;
+      if (state.holeShape === 'circle') {
+        const pr = (hole.d/2/Math.max(pw,ph))*texSize;
+        tcx.beginPath(); tcx.arc(px, py, pr, 0, Math.PI*2); tcx.fill();
+      } else {
+        const s = (hole.d/Math.max(pw,ph))*texSize;
+        tcx.fillRect(px-s/2, py-s/2, s, s);
+      }
+    }
+    const atex = new THREE.CanvasTexture(tc);
+    atex.colorSpace = THREE.SRGBColorSpace;
+    const sW = pw * scale, sH = ph * scale;
+    const mat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(state.panelColor), alphaMap: atex,
+      transparent: true, side: THREE.DoubleSide, roughness: 0.4, metalness: 0.6,
+    });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(sW, sH), mat);
+    const cx = (panel.x + pw/2)*scale - wW*scale/2;
+    const cy = -(panel.y + ph/2)*scale + wH*scale/2;
+    mesh.position.set(cx, cy, 0);
+    wallGroup.add(mesh);
+
+    if (state.backlight) {
+      const blMat = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(state.backlightColor).multiplyScalar(state.backlightIntensity),
+        side: THREE.FrontSide,
+      });
+      const blMesh = new THREE.Mesh(new THREE.PlaneGeometry(sW*0.98, sH*0.98), blMat);
+      blMesh.position.set(cx, cy, -0.3);
+      wallGroup.add(blMesh);
+    }
+  }
+  scene3d.add(wallGroup);
+  const dist = Math.max(wW,wH)*scale / (2*Math.tan(Math.PI*camera3d.fov/360));
+  camera3d.position.set(0, 0, dist*1.15);
+  controls3d.target.set(0, 0, 0); controls3d.update();
+}
+function animate3d() {
+  requestAnimationFrame(animate3d);
+  if (state.activeTab !== '3d') return;
+  if (needs3dUpdate && state.grayPixels) { buildWallMesh(); needs3dUpdate = false; }
+  controls3d.update(); renderer3d.render(scene3d, camera3d);
+}
+
+// ─── Tab Switching ───────────────────────────────────────────────────
+const guidePanel = $('guidePanel');
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active'); state.activeTab = tab.dataset.tab;
+    canvas2d.style.display = 'none'; container3d.style.display = 'none'; guidePanel.style.display = 'none';
+    if (state.activeTab === '2d') {
+      canvas2d.style.display = 'block'; render2d();
+    } else if (state.activeTab === '3d') {
+      container3d.style.display = 'block'; init3d(); resize3d(); needs3dUpdate = true;
+    } else if (state.activeTab === 'guide') {
+      guidePanel.style.display = 'block';
+    }
+  });
+});
+
+// ─── Controls Wiring ─────────────────────────────────────────────────
+function wireRange(id, prop, valId, fmt) {
+  $(id).addEventListener('input', () => {
+    state[prop] = parseFloat($(id).value);
+    if (valId) $(valId).textContent = fmt ? fmt(state[prop]) : state[prop];
+    if (prop === 'brightness' || prop === 'contrast') processImage();
+    scheduleUpdate();
+  });
+}
+wireRange('brightness','brightness','brightnessVal');
+wireRange('contrast','contrast','contrastVal');
+wireRange('margin','margin','marginVal');
+wireRange('threshold','threshold','thresholdVal');
+wireRange('gamma','gamma','gammaVal', v => v.toFixed(1));
+wireRange('backlightIntensity','backlightIntensity','backlightIntensityVal', v => v.toFixed(1));
+
+function wireNumber(id, prop, mul) {
+  $(id).addEventListener('input', () => {
+    const v = parseFloat($(id).value);
+    if (!isNaN(v) && v > 0) { state[prop] = mul ? v*mul : v; scheduleUpdate(); }
+  });
+}
+wireNumber('wallW','wallW',12);
+wireNumber('wallH','wallH',12);
+// hole size toggles (multi-select)
+document.querySelectorAll('#holeSizeToggles .size-tog').forEach(btn => {
+  btn.addEventListener('click', () => {
+    btn.classList.toggle('active');
+    state.enabledHoleSizes = [...document.querySelectorAll('#holeSizeToggles .size-tog.active')]
+      .map(b => parseFloat(b.dataset.size));
+    if (!state.enabledHoleSizes.length) { btn.classList.add('active'); state.enabledHoleSizes = [parseFloat(btn.dataset.size)]; }
+    scheduleUpdate();
+  });
+});
+wireNumber('gridCols','gridCols');
+wireNumber('gridRows','gridRows');
+
+$('panelGap').addEventListener('input', () => {
+  const v = parseFloat($('panelGap').value);
+  if (!isNaN(v) && v >= 0) { state.panelGap = v; scheduleUpdate(); }
+});
+
+// size toggles (multi-select)
+document.querySelectorAll('#widthToggles .size-tog').forEach(btn => {
+  btn.addEventListener('click', () => {
+    btn.classList.toggle('active');
+    state.enabledWidths = [...document.querySelectorAll('#widthToggles .size-tog.active')]
+      .map(b => parseInt(b.dataset.size));
+    if (!state.enabledWidths.length) { btn.classList.add('active'); state.enabledWidths = [parseInt(btn.dataset.size)]; }
+    scheduleUpdate();
+  });
+});
+document.querySelectorAll('#heightToggles .size-tog').forEach(btn => {
+  btn.addEventListener('click', () => {
+    btn.classList.toggle('active');
+    state.enabledHeights = [...document.querySelectorAll('#heightToggles .size-tog.active')]
+      .map(b => parseInt(b.dataset.size));
+    if (!state.enabledHeights.length) { btn.classList.add('active'); state.enabledHeights = [parseInt(btn.dataset.size)]; }
+    scheduleUpdate();
+  });
+});
+
+// layout select
+$('layoutSelect').addEventListener('change', () => {
+  state.selectedLayoutIdx = parseInt($('layoutSelect').value);
+  applySelectedLayout();
+  computeAllHoles();
+  render2d(); needs3dUpdate = true; updateStats(); updateExportSelect();
+});
+
+// spacing
+$('spacingX').addEventListener('input', () => {
+  let v = parseFloat($('spacingX').value);
+  if (!isNaN(v)) {
+    v = Math.max(state.minSpacing, v);
+    state.spacingX = v;
+    if (state.lockRatio) { state.spacingY = v; $('spacingY').value = v; }
+    scheduleUpdate();
+  }
+});
+$('spacingY').addEventListener('input', () => {
+  let v = parseFloat($('spacingY').value);
+  if (!isNaN(v)) {
+    v = Math.max(state.minSpacing, v);
+    state.spacingY = v;
+    if (state.lockRatio) { state.spacingX = v; $('spacingX').value = v; }
+    scheduleUpdate();
+  }
+});
+$('spacingX').addEventListener('blur', () => { $('spacingX').value = state.spacingX; });
+$('spacingY').addEventListener('blur', () => { $('spacingY').value = state.spacingY; });
+$('lockRatio').addEventListener('click', () => {
+  state.lockRatio = !state.lockRatio;
+  $('lockRatio').classList.toggle('active', state.lockRatio);
+});
+
+$('invertToggle').addEventListener('click', () => {
+  state.invert = !state.invert;
+  $('invertToggle').classList.toggle('active', state.invert);
+  processImage(); scheduleUpdate();
+});
+$('backlightToggle').addEventListener('click', () => {
+  state.backlight = !state.backlight;
+  $('backlightToggle').classList.toggle('active', state.backlight);
+  scheduleUpdate();
+});
+$('showLabelsToggle').addEventListener('click', () => {
+  state.showLabels = !state.showLabels;
+  $('showLabelsToggle').classList.toggle('active', state.showLabels);
+  render2d();
+});
+
+$('panelColor').addEventListener('input', e => { state.panelColor = e.target.value; scheduleUpdate(); });
+$('bgColor').addEventListener('input', e => { state.bgColor = e.target.value; scheduleUpdate(); });
+$('backlightColor').addEventListener('input', e => { state.backlightColor = e.target.value; scheduleUpdate(); });
+
+$('modeSpacing').addEventListener('click', () => {
+  state.spacingMode = 'spacing';
+  $('modeSpacing').classList.add('active'); $('modeCount').classList.remove('active');
+  $('spacingControls').style.display = ''; $('countControls').style.display = 'none';
+  scheduleUpdate();
+});
+$('modeCount').addEventListener('click', () => {
+  state.spacingMode = 'count';
+  $('modeCount').classList.add('active'); $('modeSpacing').classList.remove('active');
+  $('spacingControls').style.display = 'none'; $('countControls').style.display = '';
+  scheduleUpdate();
+});
+
+$('patternRect').addEventListener('click', () => {
+  state.gridPattern = 'rect';
+  $('patternRect').classList.add('active'); $('patternHex').classList.remove('active');
+  scheduleUpdate();
+});
+$('patternHex').addEventListener('click', () => {
+  state.gridPattern = 'hex';
+  $('patternHex').classList.add('active'); $('patternRect').classList.remove('active');
+  scheduleUpdate();
+});
+$('shapeCircle').addEventListener('click', () => {
+  state.holeShape = 'circle';
+  $('shapeCircle').classList.add('active'); $('shapeSquare').classList.remove('active');
+  scheduleUpdate();
+});
+$('shapeSquare').addEventListener('click', () => {
+  state.holeShape = 'square';
+  $('shapeSquare').classList.add('active'); $('shapeCircle').classList.remove('active');
+  scheduleUpdate();
+});
+
+// ─── Statistics ──────────────────────────────────────────────────────
+function updateStats() {
+  const panels = state.panels;
+  const totalHoles = panels.reduce((s, p) => s + p.holes.length, 0);
+  $('statWall').textContent = `${(state.wallW/12).toFixed(1)}' x ${(state.wallH/12).toFixed(1)}'`;
+  $('statPanels').textContent = panels.length ? `${state.colWidths.length} x ${state.rowHeights.length} = ${panels.length}` : '—';
+
+  if (state.layoutOptions.length > 0) {
+    const opt = state.layoutOptions[state.selectedLayoutIdx];
+    $('statCoverage').textContent = (opt.totalCoverage * 100).toFixed(1) + '%';
+  } else {
+    $('statCoverage').textContent = '—';
+  }
+
+  $('statHoles').textContent = totalHoles || '—';
+  if (totalHoles > 0) {
+    let openArea = 0;
+    const sizeCounts = {};
+    for (const p of panels) for (const h of p.holes) {
+      openArea += state.holeShape === 'circle' ? Math.PI*(h.d/2)*(h.d/2) : h.d*h.d;
+      sizeCounts[h.d] = (sizeCounts[h.d] || 0) + 1;
+    }
+    const totalArea = panels.reduce((s, p) => s + p.w * p.h, 0);
+    $('statOpen').textContent = (openArea / totalArea * 100).toFixed(1) + '%';
+    const usedSizes = Object.keys(sizeCounts).map(Number).sort((a,b) => b - a);
+    $('statSizesUsed').textContent = usedSizes.length + ' sizes';
+  } else {
+    $('statOpen').textContent = '—'; $('statSizesUsed').textContent = '—';
+  }
+
+  // pricing
+  const panelSF = panels.reduce((s, p) => s + (p.w * p.h) / 144, 0);
+  if (panelSF > 0) {
+    $('priceArea').textContent = panelSF.toFixed(1) + ' SF';
+    $('priceTotal').textContent = '$' + (panelSF * 42).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  } else {
+    $('priceArea').textContent = '—'; $('priceTotal').textContent = '—';
+  }
+}
+
+// ─── Export ──────────────────────────────────────────────────────────
+function updateExportSelect() {
+  const sel = $('exportTarget'), cur = sel.value;
+  sel.innerHTML = '<option value="all">All Panels (Full Wall)</option>';
+  for (const p of state.panels) {
+    const o = document.createElement('option');
+    o.value = p.label; o.textContent = `Panel ${p.label} (${p.sizeLabel})`;
+    sel.appendChild(o);
+  }
+  if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+}
+function getExportPanels() {
+  const t = $('exportTarget').value;
+  return t === 'all' ? state.panels : state.panels.filter(p => p.label === t);
+}
+
+$('exportSVG').addEventListener('click', () => {
+  const panels = getExportPanels(), target = $('exportTarget').value;
+  if (!panels.length || !panels.some(p => p.holes.length)) return;
+  if (target === 'all') {
+    let svg = `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${state.wallW}in" height="${state.wallH}in" viewBox="0 0 ${state.wallW} ${state.wallH}">\n`;
+    for (const p of panels) {
+      svg += `  <g id="panel-${p.label}" transform="translate(${p.x.toFixed(4)},${p.y.toFixed(4)})">\n`;
+      svg += `    <rect x="0" y="0" width="${p.w}" height="${p.h}" fill="none" stroke="#000" stroke-width="0.01"/>\n`;
+      for (const h of p.holes) {
+        if (state.holeShape === 'circle') svg += `    <circle cx="${h.x.toFixed(4)}" cy="${h.y.toFixed(4)}" r="${(h.d/2).toFixed(4)}" fill="none" stroke="#000" stroke-width="0.005"/>\n`;
+        else { const hf = h.d/2; svg += `    <rect x="${(h.x-hf).toFixed(4)}" y="${(h.y-hf).toFixed(4)}" width="${h.d.toFixed(4)}" height="${h.d.toFixed(4)}" fill="none" stroke="#000" stroke-width="0.005"/>\n`; }
+      }
+      svg += `  </g>\n`;
+    }
+    svg += `</svg>`;
+    downloadFile('wall-all-panels.svg', svg, 'image/svg+xml');
+  } else {
+    const p = panels[0];
+    let svg = `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${p.w}in" height="${p.h}in" viewBox="0 0 ${p.w} ${p.h}">\n`;
+    svg += `  <rect x="0" y="0" width="${p.w}" height="${p.h}" fill="none" stroke="#000" stroke-width="0.01"/>\n`;
+    for (const h of p.holes) {
+      if (state.holeShape === 'circle') svg += `  <circle cx="${h.x.toFixed(4)}" cy="${h.y.toFixed(4)}" r="${(h.d/2).toFixed(4)}" fill="none" stroke="#000" stroke-width="0.005"/>\n`;
+      else { const hf = h.d/2; svg += `  <rect x="${(h.x-hf).toFixed(4)}" y="${(h.y-hf).toFixed(4)}" width="${h.d.toFixed(4)}" height="${h.d.toFixed(4)}" fill="none" stroke="#000" stroke-width="0.005"/>\n`; }
+    }
+    svg += `</svg>`;
+    downloadFile(`panel-${p.label}.svg`, svg, 'image/svg+xml');
+  }
+});
+
+$('exportDXF').addEventListener('click', () => {
+  const panels = getExportPanels(), target = $('exportTarget').value;
+  if (!panels.length || !panels.some(p => p.holes.length)) return;
+  let dxf = '0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n2\n';
+  dxf += '0\nLAYER\n2\nPANEL\n70\n0\n62\n7\n6\nCONTINUOUS\n';
+  dxf += '0\nLAYER\n2\nHOLES\n70\n0\n62\n1\n6\nCONTINUOUS\n';
+  dxf += '0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n';
+  const refH = target === 'all' ? state.wallH : panels[0].h;
+  for (const p of panels) {
+    const ox = target === 'all' ? p.x : 0, oy = target === 'all' ? p.y : 0;
+    const corners = [[ox,oy],[ox+p.w,oy],[ox+p.w,oy+p.h],[ox,oy+p.h]];
+    for (let i = 0; i < 4; i++) {
+      const [x1,y1]=corners[i],[x2,y2]=corners[(i+1)%4];
+      dxf += `0\nLINE\n8\nPANEL\n10\n${x1.toFixed(4)}\n20\n${(refH-y1).toFixed(4)}\n30\n0\n11\n${x2.toFixed(4)}\n21\n${(refH-y2).toFixed(4)}\n31\n0\n`;
+    }
+    for (const h of p.holes) {
+      const hx = ox+h.x, hy = oy+h.y;
+      if (state.holeShape === 'circle')
+        dxf += `0\nCIRCLE\n8\nHOLES\n10\n${hx.toFixed(4)}\n20\n${(refH-hy).toFixed(4)}\n30\n0\n40\n${(h.d/2).toFixed(4)}\n`;
+      else {
+        const hf = h.d/2;
+        const sq = [[hx-hf,refH-(hy-hf)],[hx+hf,refH-(hy-hf)],[hx+hf,refH-(hy+hf)],[hx-hf,refH-(hy+hf)]];
+        for (let i = 0; i < 4; i++) { const [x1,y1]=sq[i],[x2,y2]=sq[(i+1)%4];
+          dxf += `0\nLINE\n8\nHOLES\n10\n${x1.toFixed(4)}\n20\n${y1.toFixed(4)}\n30\n0\n11\n${x2.toFixed(4)}\n21\n${y2.toFixed(4)}\n31\n0\n`; }
+      }
+    }
+  }
+  dxf += '0\nENDSEC\n0\nEOF\n';
+  downloadFile(target === 'all' ? 'wall-all-panels.dxf' : `panel-${panels[0].label}.dxf`, dxf, 'application/dxf');
+});
+
+$('exportPNG').addEventListener('click', () => {
+  const target = state.activeTab === '2d' ? canvas2d : renderer3d?.domElement;
+  if (!target) return;
+  if (state.activeTab === '3d') renderer3d.render(scene3d, camera3d);
+  target.toBlob(blob => {
+    const url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = state.activeTab === '2d' ? 'wall.png' : 'wall-3d.png';
+    a.click(); URL.revokeObjectURL(url);
+  });
+});
+
+function downloadFile(name, content, type) {
+  const blob = new Blob([content], { type }), url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function hexToRgb(hex) {
+  return { r: parseInt(hex.slice(1,3),16), g: parseInt(hex.slice(3,5),16), b: parseInt(hex.slice(5,7),16) };
+}
+
+window.addEventListener('resize', () => { if (state.activeTab === '2d') render2d(); else resize3d(); });
+
+// ─── Initial ─────────────────────────────────────────────────────────
+solveAndApplyLayout();
+resetView();
+render2d();
+updateStats();
+updateExportSelect();
+</script>
+</body>
+</html>
