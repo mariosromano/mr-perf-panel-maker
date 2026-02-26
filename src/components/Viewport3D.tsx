@@ -9,6 +9,7 @@ interface Viewport3DProps {
   lightingPreset: LightingPreset;
   floorEnabled: boolean;
   scaleFigureEnabled: boolean;
+  ceilingMode: boolean;
   rendererRef: React.MutableRefObject<unknown>;
   sceneRef: React.MutableRefObject<unknown>;
   cameraRef: React.MutableRefObject<unknown>;
@@ -19,6 +20,7 @@ export default function Viewport3D({
   lightingPreset,
   floorEnabled,
   scaleFigureEnabled,
+  ceilingMode,
   rendererRef,
   sceneRef,
   cameraRef,
@@ -27,6 +29,7 @@ export default function Viewport3D({
   const controlsRef = useRef<OrbitControls | null>(null);
   const wallGroupRef = useRef<THREE.Group | null>(null);
   const lightsInSceneRef = useRef<THREE.Light[]>([]);
+  const ceilingLightRef = useRef<THREE.DirectionalLight | null>(null);
   const gridHelperRef = useRef<THREE.GridHelper | null>(null);
   const floorMeshRef = useRef<THREE.Mesh | null>(null);
   const scaleFigureRef = useRef<THREE.Mesh | null>(null);
@@ -35,6 +38,11 @@ export default function Viewport3D({
   const initializedRef = useRef(false);
   const floorYRef = useRef<number>(0);
   const cameraSetRef = useRef(false);
+
+  // Reset camera when ceiling mode changes
+  useEffect(() => {
+    cameraSetRef.current = false;
+  }, [ceilingMode]);
 
   // Initialize Three.js scene
   useEffect(() => {
@@ -226,17 +234,77 @@ export default function Viewport3D({
 
       // Backlight plane
       if (panelState.backlight) {
-        const blMat = new THREE.MeshBasicMaterial({
-          color: new THREE.Color(panelState.backlightColor).multiplyScalar(panelState.backlightIntensity),
-          side: THREE.FrontSide,
-        });
+        let blMat: THREE.Material;
+        if (panelState.backlightMode === 'gradient') {
+          // Shader-based gradient backlight
+          const c1 = new THREE.Color(panelState.backlightColor).multiplyScalar(panelState.backlightIntensity);
+          const c2 = new THREE.Color(panelState.backlightColor2).multiplyScalar(panelState.backlightIntensity);
+          const angle = (panelState.backlightGradientAngle * Math.PI) / 180;
+          blMat = new THREE.ShaderMaterial({
+            uniforms: {
+              color1: { value: c1 },
+              color2: { value: c2 },
+              angle: { value: angle },
+            },
+            vertexShader: `
+              varying vec2 vUv;
+              void main() {
+                vUv = uv;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+              }
+            `,
+            fragmentShader: `
+              uniform vec3 color1;
+              uniform vec3 color2;
+              uniform float angle;
+              varying vec2 vUv;
+              void main() {
+                vec2 dir = vec2(cos(angle), sin(angle));
+                float t = dot(vUv - 0.5, dir) + 0.5;
+                t = clamp(t, 0.0, 1.0);
+                gl_FragColor = vec4(mix(color1, color2, t), 1.0);
+              }
+            `,
+            side: THREE.FrontSide,
+          });
+        } else {
+          blMat = new THREE.MeshBasicMaterial({
+            color: new THREE.Color(panelState.backlightColor).multiplyScalar(panelState.backlightIntensity),
+            side: THREE.FrontSide,
+          });
+        }
         const blMesh = new THREE.Mesh(new THREE.PlaneGeometry(sW * 0.98, sH * 0.98), blMat);
         blMesh.position.set(cx, cy, -0.3);
         wallGroup.add(blMesh);
       }
     }
 
+    // Apply ceiling mode: rotate wall horizontal and lift up
+    if (ceilingMode) {
+      wallGroup.rotation.x = Math.PI / 2;
+      const ceilingHeight = (wH * scale) * 0.6;
+      wallGroup.position.y = ceilingHeight;
+    } else {
+      wallGroup.rotation.x = 0;
+      wallGroup.position.y = 0;
+    }
+
     scene.add(wallGroup);
+
+    // Apply background color to 3D scene
+    scene.background = new THREE.Color(panelState.bgColor);
+
+    // Ceiling mode fill light — illuminate the underside of ceiling panels
+    if (ceilingLightRef.current) {
+      scene.remove(ceilingLightRef.current);
+      ceilingLightRef.current = null;
+    }
+    if (ceilingMode) {
+      const fillLight = new THREE.DirectionalLight(0xffffff, 1.2);
+      fillLight.position.set(0, -30, 0); // shines upward
+      scene.add(fillLight);
+      ceilingLightRef.current = fillLight;
+    }
 
     // Compute actual panel bottom Y (panels are centered in wall, so bottom != wall bottom)
     let panelBottomY = -(wH * scale) / 2;  // fallback to wall bottom
@@ -245,22 +313,36 @@ export default function Viewport3D({
         return -(p.y + p.h) * scale + (wH * scale) / 2;
       }));
     }
-    floorYRef.current = panelBottomY;
 
-    // Move grid to panel base level
-    if (gridHelperRef.current) {
-      gridHelperRef.current.position.y = panelBottomY;
+    if (ceilingMode) {
+      // In ceiling mode, floor is below the viewer
+      const floorLevel = -10;
+      floorYRef.current = floorLevel;
+      if (gridHelperRef.current) {
+        gridHelperRef.current.position.y = floorLevel;
+      }
+    } else {
+      floorYRef.current = panelBottomY;
+      if (gridHelperRef.current) {
+        gridHelperRef.current.position.y = panelBottomY;
+      }
     }
 
     // Position camera only on first build (don't reset user's orbit)
     if (!cameraSetRef.current) {
       cameraSetRef.current = true;
       const dist = Math.max(wW, wH) * scale / (2 * Math.tan(Math.PI * camera.fov / 360));
-      camera.position.set(0, 0, dist * 1.15);
-      controls.target.set(0, 0, 0);
+      if (ceilingMode) {
+        const ceilingHeight = (wH * scale) * 0.6;
+        camera.position.set(0, ceilingHeight * 0.3, 0.01);
+        controls.target.set(0, ceilingHeight, 0);
+      } else {
+        camera.position.set(0, 0, dist * 1.15);
+        controls.target.set(0, 0, 0);
+      }
       controls.update();
     }
-  }, [panelState]);
+  }, [panelState, ceilingMode]);
 
   // Lighting
   useEffect(() => {
@@ -378,11 +460,21 @@ export default function Viewport3D({
           alphaTest: 0.1,
         });
         const figure = new THREE.Mesh(planeGeo, planeMat);
-        figure.position.set(
-          (wW * wallScale) / 2 + figW,
-          floorY + figH / 2,
-          0
-        );
+        if (ceilingMode) {
+          // Stand on the floor below the ceiling
+          const groundY = -10;
+          figure.position.set(
+            (wW * wallScale) / 2 + figW,
+            groundY + figH / 2,
+            0
+          );
+        } else {
+          figure.position.set(
+            (wW * wallScale) / 2 + figW,
+            floorY + figH / 2,
+            0
+          );
+        }
         scene.add(figure);
         scaleFigureRef.current = figure;
       };
@@ -410,7 +502,7 @@ export default function Viewport3D({
         scaleFigureRef.current = null;
       }
     };
-  }, [scaleFigureEnabled, panelState]);
+  }, [scaleFigureEnabled, panelState, ceilingMode]);
 
   return (
     <div ref={containerRef} className="absolute inset-0" />

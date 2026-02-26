@@ -13,6 +13,8 @@ interface ControlPanelProps {
   onFloorEnabledChange: (enabled: boolean) => void;
   scaleFigureEnabled: boolean;
   onScaleFigureEnabledChange: (enabled: boolean) => void;
+  ceilingMode: boolean;
+  onCeilingModeChange: (enabled: boolean) => void;
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   rendererRef: React.RefObject<unknown>;
   sceneRef: React.RefObject<unknown>;
@@ -137,6 +139,8 @@ export default function ControlPanel({
   onFloorEnabledChange,
   scaleFigureEnabled,
   onScaleFigureEnabledChange,
+  ceilingMode,
+  onCeilingModeChange,
   canvasRef,
   rendererRef,
   sceneRef,
@@ -146,6 +150,7 @@ export default function ControlPanel({
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [exportTarget, setExportTarget] = useState('all');
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showSamples, setShowSamples] = useState(false);
 
   const stats = computeStats(panelState);
 
@@ -168,6 +173,25 @@ export default function ControlPanel({
     e.preventDefault();
     if (e.dataTransfer.files.length > 0) handleImageUpload(e.dataTransfer.files[0]);
   }, [handleImageUpload]);
+
+  const handleSampleSelect = useCallback((filename: string) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob(blob => {
+        if (!blob) return;
+        const file = new File([blob], filename, { type: 'image/jpeg' });
+        setImagePreview(`/samples/${filename}`);
+        onImageLoad(file);
+      }, 'image/jpeg', 0.92);
+    };
+    img.src = `/samples/${filename}`;
+  }, [onImageLoad]);
 
   const fmtPrice = (n: number) =>
     '$' + n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -210,9 +234,9 @@ export default function ControlPanel({
             onDragOver={(e) => e.preventDefault()}
             onDrop={handleDrop}
           >
-            {imagePreview ? (
+            {(imagePreview || panelState.sourceImage?.src) ? (
               <>
-                <img src={imagePreview} alt="Preview" className="max-w-full max-h-[140px] rounded" />
+                <img src={imagePreview || panelState.sourceImage?.src} alt="Preview" className="max-w-full max-h-[140px] rounded" />
                 <button
                   className="absolute top-1 right-1 w-[22px] h-[22px] bg-[#e55] text-white border-none rounded-full text-sm cursor-pointer leading-none"
                   onClick={(e) => { e.stopPropagation(); handleClearImage(); }}
@@ -233,6 +257,52 @@ export default function ControlPanel({
             className="hidden"
             onChange={(e) => { if (e.target.files?.length) handleImageUpload(e.target.files[0]); }}
           />
+          <button
+            onClick={() => setShowSamples(!showSamples)}
+            className={`w-full mt-2 mb-2 py-1.5 border rounded-md text-[11px] cursor-pointer font-medium transition-colors ${
+              showSamples ? 'bg-[#2a2a3e] border-[#4a9eff] text-[#4a9eff]' : 'bg-transparent border-[#3a3a3e] text-[#888] hover:text-[#ccc] hover:border-[#555]'
+            }`}
+          >
+            {showSamples ? 'Hide Samples' : 'Sample Images'}
+          </button>
+          {showSamples && (
+            <div className="grid grid-cols-5 gap-1.5 mb-2">
+              {[
+                { file: 'radiating_starburst_light_rays.jpg', label: 'Starburst' },
+                { file: 'soccer_player_kicking_white_on_black.jpg', label: 'Soccer' },
+                { file: 'guadalupe_face_dotted_pattern.jpg', label: 'Guadalupe' },
+                { file: 'jimi_hendrix_portrait_circles.jpg', label: 'Portrait' },
+                { file: 'gradient_sunset_skyline_colorful.jpg', label: 'Skyline' },
+                { file: 'flowing_waves_starry_night.jpg', label: 'Waves' },
+                { file: 'abstract_marble_ink_texture.jpg', label: 'Marble' },
+                { file: 'bird_head_splatter_closeup.jpg', label: 'Bird' },
+                { file: 'ink_dense_forest_misty_canopy.jpg', label: 'Forest' },
+                { file: 'peony_flower_line_drawing.jpg', label: 'Flower' },
+                { file: 'oceanworld.jpg', label: 'Ocean' },
+                { file: 'woodgrain2.jpg', label: 'Wood' },
+                { file: 'woodgrain3.jpg', label: 'Grain' },
+                { file: 'woodblack.jpg', label: 'Flow' },
+                { file: 'clouds.jpg', label: 'Clouds' },
+              ].map(s => (
+                <button
+                  key={s.file}
+                  onClick={() => handleSampleSelect(s.file)}
+                  className="group relative aspect-square rounded overflow-hidden border border-[#3a3a3e] cursor-pointer hover:border-[#4a9eff] transition-colors"
+                  title={s.label}
+                >
+                  <img
+                    src={`/samples/${s.file}`}
+                    alt={s.label}
+                    loading="lazy"
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-end justify-center">
+                    <span className="text-[8px] text-white opacity-0 group-hover:opacity-100 transition-opacity pb-0.5 font-medium">{s.label}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
           <Toggle label="Invert Image" checked={panelState.invert} onChange={v => onStateChange({ invert: v })} />
         </Section>
 
@@ -479,15 +549,59 @@ export default function ControlPanel({
             <Toggle label="Backlight" checked={panelState.backlight} onChange={v => onStateChange({ backlight: v })} />
             {panelState.backlight && (
               <>
-                <label className="flex items-center justify-between mb-2 text-[13px]">
-                  <span className="text-[#e0e0e0]">Backlight Color</span>
-                  <input
-                    type="color"
-                    className="w-8 h-6 border border-[#3a3a3e] rounded cursor-pointer bg-transparent p-0.5"
-                    value={panelState.backlightColor}
-                    onChange={e => onStateChange({ backlightColor: e.target.value })}
-                  />
-                </label>
+                {/* Solid / Gradient toggle */}
+                <div className="flex items-center justify-between mb-2 text-[13px]">
+                  <span className="text-[#e0e0e0]">Mode</span>
+                  <div className="flex bg-[#1a1a1e] rounded-lg overflow-hidden border border-[#3a3a3e]">
+                    <button
+                      className={`px-3 py-1 text-[11px] font-medium transition-colors ${panelState.backlightMode === 'solid' ? 'bg-[#4a9eff] text-white' : 'text-[#888] hover:text-white'}`}
+                      onClick={() => onStateChange({ backlightMode: 'solid' })}
+                    >Solid</button>
+                    <button
+                      className={`px-3 py-1 text-[11px] font-medium transition-colors ${panelState.backlightMode === 'gradient' ? 'bg-[#4a9eff] text-white' : 'text-[#888] hover:text-white'}`}
+                      onClick={() => onStateChange({ backlightMode: 'gradient' })}
+                    >Gradient</button>
+                  </div>
+                </div>
+                {panelState.backlightMode === 'gradient' ? (
+                  <>
+                    <div className="flex items-center justify-between mb-2 text-[13px]">
+                      <span className="text-[#e0e0e0]">Colors</span>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="color"
+                          className="w-8 h-6 border border-[#3a3a3e] rounded cursor-pointer bg-transparent p-0.5"
+                          value={panelState.backlightColor}
+                          onChange={e => onStateChange({ backlightColor: e.target.value })}
+                        />
+                        <span className="text-[10px] text-[#666]">to</span>
+                        <input
+                          type="color"
+                          className="w-8 h-6 border border-[#3a3a3e] rounded cursor-pointer bg-transparent p-0.5"
+                          value={panelState.backlightColor2}
+                          onChange={e => onStateChange({ backlightColor2: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                    {/* Gradient preview bar */}
+                    <div
+                      className="h-3 rounded-md mb-2 border border-[#3a3a3e]"
+                      style={{ background: `linear-gradient(${90 + panelState.backlightGradientAngle}deg, ${panelState.backlightColor}, ${panelState.backlightColor2})` }}
+                    />
+                    <Slider label="Angle" value={panelState.backlightGradientAngle} min={-180} max={180} step={5}
+                      format={v => `${v}°`} onChange={v => onStateChange({ backlightGradientAngle: v })} />
+                  </>
+                ) : (
+                  <label className="flex items-center justify-between mb-2 text-[13px]">
+                    <span className="text-[#e0e0e0]">Backlight Color</span>
+                    <input
+                      type="color"
+                      className="w-8 h-6 border border-[#3a3a3e] rounded cursor-pointer bg-transparent p-0.5"
+                      value={panelState.backlightColor}
+                      onChange={e => onStateChange({ backlightColor: e.target.value })}
+                    />
+                  </label>
+                )}
                 <Slider label="Intensity" value={panelState.backlightIntensity} min={0} max={2} step={0.05}
                   format={v => v.toFixed(1)} onChange={v => onStateChange({ backlightIntensity: v })} />
               </>
@@ -495,6 +609,7 @@ export default function ControlPanel({
             <Toggle label="Show panel labels" checked={panelState.showLabels} onChange={v => onStateChange({ showLabels: v })} />
             <Toggle label="Floor" checked={floorEnabled} onChange={onFloorEnabledChange} />
             <Toggle label="Scale Figure" checked={scaleFigureEnabled} onChange={onScaleFigureEnabledChange} />
+            <Toggle label="Ceiling Mode" checked={ceilingMode} onChange={onCeilingModeChange} />
           </Section>
         )}
 

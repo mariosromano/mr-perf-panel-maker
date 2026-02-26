@@ -72,7 +72,10 @@ export interface PanelState {
   panelColor: string;
   bgColor: string;
   backlight: boolean;
+  backlightMode: 'solid' | 'gradient';
   backlightColor: string;
+  backlightColor2: string;
+  backlightGradientAngle: number;
   backlightIntensity: number;
   showLabels: boolean;
 
@@ -123,7 +126,10 @@ export const DEFAULT_PANEL_STATE: PanelState = {
   panelColor: '#808080',
   bgColor: '#111111',
   backlight: true,
-  backlightColor: '#ffaa44',
+  backlightMode: 'gradient',
+  backlightColor: '#ff69b4',
+  backlightColor2: '#4488ff',
+  backlightGradientAngle: 0,
   backlightIntensity: 1.0,
   showLabels: true,
   layoutOptions: [],

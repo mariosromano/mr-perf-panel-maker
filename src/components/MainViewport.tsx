@@ -12,6 +12,7 @@ interface MainViewportProps {
   lightingPreset: LightingPreset;
   floorEnabled: boolean;
   scaleFigureEnabled: boolean;
+  ceilingMode: boolean;
   rendererRef: React.MutableRefObject<unknown>;
   sceneRef: React.MutableRefObject<unknown>;
   cameraRef: React.MutableRefObject<unknown>;
@@ -24,6 +25,7 @@ export default function MainViewport({
   lightingPreset,
   floorEnabled,
   scaleFigureEnabled,
+  ceilingMode,
   rendererRef,
   sceneRef,
   cameraRef,
@@ -37,7 +39,7 @@ export default function MainViewport({
   return (
     <div className="flex-1 flex flex-col min-w-0">
       {/* Tab bar */}
-      <div className="flex bg-[#222226] border-b border-[#3a3a3e] px-3">
+      <div className="flex gap-4 bg-[#222226] border-b border-[#3a3a3e] px-3">
         {tabs.map(tab => (
           <button
             key={tab.id}
@@ -65,6 +67,7 @@ export default function MainViewport({
               lightingPreset={lightingPreset}
               floorEnabled={floorEnabled}
               scaleFigureEnabled={scaleFigureEnabled}
+              ceilingMode={ceilingMode}
               rendererRef={rendererRef}
               sceneRef={sceneRef}
               cameraRef={cameraRef}

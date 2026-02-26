@@ -23,6 +23,7 @@ interface ChatPanelProps {
   onLightingPresetChange: (preset: LightingPreset) => void;
   onScaleFigureEnabledChange: (enabled: boolean) => void;
   onFloorEnabledChange: (enabled: boolean) => void;
+  onCeilingModeChange: (enabled: boolean) => void;
   rendererRef: React.MutableRefObject<unknown>;
   sceneRef: React.MutableRefObject<unknown>;
   cameraRef: React.MutableRefObject<unknown>;
@@ -36,6 +37,7 @@ export default function ChatPanel({
   onLightingPresetChange,
   onScaleFigureEnabledChange,
   onFloorEnabledChange,
+  onCeilingModeChange,
   rendererRef,
   sceneRef,
   cameraRef,
@@ -63,6 +65,10 @@ export default function ChatPanel({
     'Perforated metal panel wall, realistic architectural photography, backlit warm amber glow, keep exact hole pattern and scale'
   );
   const [renderResult, setRenderResult] = useState<string | null>(null);
+  const [renderProgress, setRenderProgress] = useState(0);
+  const [renderStartTime, setRenderStartTime] = useState<number | null>(null);
+  const [renderElapsed, setRenderElapsed] = useState(0);
+  const renderTimerRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const [floatingFadingOut, setFloatingFadingOut] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -85,6 +91,21 @@ export default function ChatPanel({
       floatingTextareaRef.current.focus();
     }
   }, [isFloating, floatingFadingOut]);
+
+  // Render progress timer
+  useEffect(() => {
+    if (rendering && renderStartTime) {
+      renderTimerRef.current = setInterval(() => {
+        const elapsed = (Date.now() - renderStartTime) / 1000;
+        setRenderElapsed(elapsed);
+        // Asymptotic curve: ~42% at 5s, ~63% at 10s, ~76% at 15s, ~82% at 20s
+        setRenderProgress(90 * (1 - Math.exp(-elapsed / 8)));
+      }, 100);
+      return () => clearInterval(renderTimerRef.current);
+    } else {
+      clearInterval(renderTimerRef.current);
+    }
+  }, [rendering, renderStartTime]);
 
   const handleKeyChange = useCallback((val: string) => {
     setApiKey(val);
@@ -127,7 +148,10 @@ export default function ChatPanel({
     if (aiParams.panelColor !== undefined) updates.panelColor = String(aiParams.panelColor);
     if (aiParams.bgColor !== undefined) updates.bgColor = String(aiParams.bgColor);
     if (aiParams.backlightEnabled !== undefined) updates.backlight = Boolean(aiParams.backlightEnabled);
+    if (aiParams.backlightMode !== undefined) updates.backlightMode = aiParams.backlightMode as 'solid' | 'gradient';
     if (aiParams.backlightColor !== undefined) updates.backlightColor = String(aiParams.backlightColor);
+    if (aiParams.backlightColor2 !== undefined) updates.backlightColor2 = String(aiParams.backlightColor2);
+    if (aiParams.backlightGradientAngle !== undefined) updates.backlightGradientAngle = Number(aiParams.backlightGradientAngle);
     if (aiParams.backlightIntensity !== undefined) updates.backlightIntensity = Number(aiParams.backlightIntensity);
     if (aiParams.showLabels !== undefined) updates.showLabels = Boolean(aiParams.showLabels);
 
@@ -136,7 +160,8 @@ export default function ChatPanel({
     if (aiParams.lighting !== undefined) onLightingPresetChange(aiParams.lighting as LightingPreset);
     if (aiParams.scaleFigure !== undefined) onScaleFigureEnabledChange(Boolean(aiParams.scaleFigure));
     if (aiParams.floorEnabled !== undefined) onFloorEnabledChange(Boolean(aiParams.floorEnabled));
-  }, [onStateChange, onLightingPresetChange, onScaleFigureEnabledChange, onFloorEnabledChange]);
+    if (aiParams.ceilingMode !== undefined) onCeilingModeChange(Boolean(aiParams.ceilingMode));
+  }, [onStateChange, onLightingPresetChange, onScaleFigureEnabledChange, onFloorEnabledChange, onCeilingModeChange]);
 
   // Capture screenshot
   const captureScreenshot = useCallback((): string | null => {
@@ -171,6 +196,9 @@ export default function ChatPanel({
     setRendering(true);
     setError(null);
     setRenderResult(null);
+    setRenderProgress(0);
+    setRenderElapsed(0);
+    setRenderStartTime(Date.now());
     try {
       const dataUrl = captureScreenshot();
       if (!dataUrl) throw new Error('Could not capture screenshot');
@@ -186,6 +214,7 @@ export default function ChatPanel({
       let data: Record<string, unknown>;
       try { data = JSON.parse(text); } catch { throw new Error(`Server error (${res.status}): ${text.slice(0, 120)}`); }
       if (!res.ok) throw new Error((data.error as string) || 'Render failed');
+      setRenderProgress(100);
       setRenderResult(data.imageUrl as string);
       setMessages(prev => [
         ...prev,
@@ -196,6 +225,7 @@ export default function ChatPanel({
       setError(err instanceof Error ? err.message : 'Render failed');
     } finally {
       setRendering(false);
+      setRenderStartTime(null);
     }
   }, [falKey, serverHasFalKey, scenePrompt, captureScreenshot]);
 
@@ -418,8 +448,24 @@ export default function ChatPanel({
             </div>
           )}
           {rendering && (
-            <div className="px-3.5 py-2.5 rounded-[14px_14px_14px_4px] bg-[#3a3a3e] text-[#c9a0ff] text-[13px] inline-block">
-              Rendering photorealistic image...
+            <div className="px-3.5 py-3 rounded-[14px_14px_14px_4px] bg-[#3a3a3e] text-[13px] max-w-[88%]">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[#c9a0ff] font-medium">Rendering...</span>
+                <span className="text-[#888] text-[11px] font-mono">{Math.round(renderElapsed)}s</span>
+              </div>
+              <div className="w-full h-2 bg-[#2a2a2e] rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-200 ease-out"
+                  style={{
+                    width: `${Math.round(renderProgress)}%`,
+                    background: 'linear-gradient(90deg, #7a5aaa, #5a3a8a)',
+                  }}
+                />
+              </div>
+              <div className="flex items-center justify-between mt-1">
+                <span className="text-[#888] text-[10px]">{Math.round(renderProgress)}%</span>
+                <span className="text-[#666] text-[10px]">Generating photorealistic image</span>
+              </div>
             </div>
           )}
           {error && <div className="px-3 py-2 rounded-lg bg-[#4a2a2a] text-[#ff6b6b] text-xs">{error}</div>}
@@ -500,15 +546,25 @@ export default function ChatPanel({
               className="max-w-[90vw] max-h-[85vh] rounded-xl shadow-[0_20px_60px_rgba(0,0,0,0.5)]"
             />
             <div className="flex gap-2 justify-center mt-3">
-              <a
-                href={renderResult}
-                download="mr-walls-render.png"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-6 py-2.5 bg-[#4a9eff] text-white rounded-md text-[13px] font-semibold no-underline"
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await fetch(renderResult!);
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'mr-walls-render.png';
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  } catch {
+                    window.open(renderResult!, '_blank');
+                  }
+                }}
+                className="px-6 py-2.5 bg-[#4a9eff] text-white border-none rounded-md text-[13px] font-semibold cursor-pointer"
               >
                 Download
-              </a>
+              </button>
               <button
                 onClick={() => setRenderResult(null)}
                 className="px-6 py-2.5 bg-[#4a4a52] text-white border-none rounded-md text-[13px] font-semibold cursor-pointer"

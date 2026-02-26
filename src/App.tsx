@@ -11,7 +11,8 @@ export default function App() {
   const [lightingPreset, setLightingPreset] = useState<LightingPreset>('standard');
   const [floorEnabled, setFloorEnabled] = useState(false);
   const [scaleFigureEnabled, setScaleFigureEnabled] = useState(true);
-  const [activeTab, setActiveTab] = useState<'2d' | '3d' | 'guide'>('2d');
+  const [activeTab, setActiveTab] = useState<'2d' | '3d' | 'guide'>('3d');
+  const [ceilingMode, setCeilingMode] = useState(false);
 
   // Onboarding
   const [isFirstTimeUser, setIsFirstTimeUser] = useState(false);
@@ -138,6 +139,29 @@ export default function App() {
     setPanelState(prev => recomputeFull(prev));
   }, [recomputeFull]);
 
+  // Auto-load default sample image on mount
+  const autoLoadedRef = useRef(false);
+  useEffect(() => {
+    if (autoLoadedRef.current) return;
+    autoLoadedRef.current = true;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob(blob => {
+        if (!blob) return;
+        const file = new File([blob], 'gradient_sunset_skyline_colorful.jpg', { type: 'image/jpeg' });
+        handleImageLoad(file);
+      }, 'image/jpeg', 0.92);
+    };
+    img.src = '/samples/gradient_sunset_skyline_colorful.jpg';
+  }, [handleImageLoad]);
+
   return (
     <div className="flex w-screen h-screen">
       {/* Left: AI Chat Panel */}
@@ -146,6 +170,7 @@ export default function App() {
         onLightingPresetChange={setLightingPreset}
         onScaleFigureEnabledChange={setScaleFigureEnabled}
         onFloorEnabledChange={setFloorEnabled}
+        onCeilingModeChange={setCeilingMode}
         rendererRef={rendererRef}
         sceneRef={sceneRef}
         cameraRef={cameraRef}
@@ -162,6 +187,7 @@ export default function App() {
         lightingPreset={lightingPreset}
         floorEnabled={floorEnabled}
         scaleFigureEnabled={scaleFigureEnabled}
+        ceilingMode={ceilingMode}
         rendererRef={rendererRef}
         sceneRef={sceneRef}
         cameraRef={cameraRef}
@@ -177,6 +203,8 @@ export default function App() {
         onFloorEnabledChange={setFloorEnabled}
         scaleFigureEnabled={scaleFigureEnabled}
         onScaleFigureEnabledChange={setScaleFigureEnabled}
+        ceilingMode={ceilingMode}
+        onCeilingModeChange={setCeilingMode}
         canvasRef={canvasRef}
         rendererRef={rendererRef}
         sceneRef={sceneRef}

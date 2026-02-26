@@ -39,14 +39,46 @@ export function render2d(
     const bl = hexToRgb(state.backlightColor);
     const int = state.backlightIntensity;
     const pad = Math.max(wW, wH) * 0.03;
-    const grad = ctx.createRadialGradient(wW / 2, wH / 2, 0, wW / 2, wH / 2, Math.max(wW, wH) * 0.6);
-    grad.addColorStop(0, `rgba(${bl.r},${bl.g},${bl.b},${0.4 * int})`);
-    grad.addColorStop(1, `rgba(${bl.r},${bl.g},${bl.b},0)`);
-    ctx.fillStyle = grad;
-    ctx.fillRect(-pad, -pad, wW + pad * 2, wH + pad * 2);
+
+    if (state.backlightMode === 'gradient') {
+      const bl2 = hexToRgb(state.backlightColor2);
+      const angle = (state.backlightGradientAngle * Math.PI) / 180;
+      const diag = Math.max(wW, wH) * 0.7;
+      const cx = wW / 2, cy = wH / 2;
+      const dx = Math.cos(angle) * diag, dy = Math.sin(angle) * diag;
+      const linGrad = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
+      linGrad.addColorStop(0, `rgba(${bl.r},${bl.g},${bl.b},${0.4 * int})`);
+      linGrad.addColorStop(0.5, `rgba(${(bl.r + bl2.r) >> 1},${(bl.g + bl2.g) >> 1},${(bl.b + bl2.b) >> 1},${0.15 * int})`);
+      linGrad.addColorStop(1, `rgba(${bl2.r},${bl2.g},${bl2.b},${0.4 * int})`);
+      ctx.fillStyle = linGrad;
+      ctx.fillRect(-pad, -pad, wW + pad * 2, wH + pad * 2);
+    } else {
+      const grad = ctx.createRadialGradient(wW / 2, wH / 2, 0, wW / 2, wH / 2, Math.max(wW, wH) * 0.6);
+      grad.addColorStop(0, `rgba(${bl.r},${bl.g},${bl.b},${0.4 * int})`);
+      grad.addColorStop(1, `rgba(${bl.r},${bl.g},${bl.b},0)`);
+      ctx.fillStyle = grad;
+      ctx.fillRect(-pad, -pad, wW + pad * 2, wH + pad * 2);
+    }
   }
 
-  const blColor = state.backlight ? state.backlightColor : state.bgColor;
+  // Compute gradient helper for hole fills
+  const isGradientBL = state.backlight && state.backlightMode === 'gradient';
+  const blC1 = state.backlight ? hexToRgb(state.backlightColor) : { r: 0, g: 0, b: 0 };
+  const blC2 = isGradientBL ? hexToRgb(state.backlightColor2) : blC1;
+  const blAngleRad = isGradientBL ? (state.backlightGradientAngle * Math.PI) / 180 : 0;
+
+  function holeGradientColor(globalX: number, globalY: number): string {
+    if (!isGradientBL) return state.backlight ? state.backlightColor : state.bgColor;
+    const cx = wW / 2, cy = wH / 2;
+    const dx = globalX - cx, dy = globalY - cy;
+    const proj = dx * Math.cos(blAngleRad) + dy * Math.sin(blAngleRad);
+    const diag = Math.max(wW, wH) * 0.7;
+    const t = Math.max(0, Math.min(1, (proj / diag + 1) / 2));
+    const r = Math.round(blC1.r + (blC2.r - blC1.r) * t);
+    const g = Math.round(blC1.g + (blC2.g - blC1.g) * t);
+    const b = Math.round(blC1.b + (blC2.b - blC1.b) * t);
+    return `rgb(${r},${g},${b})`;
+  }
 
   // Draw panels
   for (const panel of state.panels) {
@@ -56,14 +88,26 @@ export function render2d(
     ctx.fillRect(0, 0, panel.w, panel.h);
 
     const holes = panel.holes;
-    ctx.fillStyle = blColor;
-    ctx.beginPath();
-    for (const hole of holes) {
-      const r = hole.d / 2;
-      ctx.moveTo(hole.x + r, hole.y);
-      ctx.arc(hole.x, hole.y, r, 0, Math.PI * 2);
+    if (isGradientBL) {
+      // Draw each hole with its position-based gradient color
+      for (const hole of holes) {
+        const r = hole.d / 2;
+        ctx.fillStyle = holeGradientColor(panel.x + hole.x, panel.y + hole.y);
+        ctx.beginPath();
+        ctx.arc(hole.x, hole.y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else {
+      const blColor = state.backlight ? state.backlightColor : state.bgColor;
+      ctx.fillStyle = blColor;
+      ctx.beginPath();
+      for (const hole of holes) {
+        const r = hole.d / 2;
+        ctx.moveTo(hole.x + r, hole.y);
+        ctx.arc(hole.x, hole.y, r, 0, Math.PI * 2);
+      }
+      ctx.fill();
     }
-    ctx.fill();
 
     // Panel border
     ctx.strokeStyle = 'rgba(255,255,255,0.25)';
