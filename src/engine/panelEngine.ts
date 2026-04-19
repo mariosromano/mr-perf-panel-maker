@@ -48,12 +48,14 @@ export function solveAxis(wallDim: number, gap: number, sizes: number[]): AxisSo
 
   function recurse(idx: number, totalDim: number, numPanels: number, counts: Record<number, number>) {
     const totalWithGaps = totalDim + Math.max(0, numPanels - 1) * gap;
-    if (totalWithGaps > wallDim + gap + 0.01) return;
+    // Panel-only check — gaps are soft (they shrink to fit during install)
+    if (totalDim > wallDim + 0.01) return;
     if (numPanels > 0) {
       results.push({
         counts: { ...counts },
         total: totalWithGaps,
-        coverage: totalWithGaps / wallDim,
+        // Coverage measures panels filling wall; gaps don't count against you
+        coverage: Math.min(1, totalDim / wallDim),
         numPanels,
       });
     }
@@ -123,16 +125,20 @@ export function solveAndBuildPanels(state: PanelState): {
   const wSolutions = solveAxis(state.wallW, state.panelGap, state.enabledWidths);
   const hSolutions = solveAxis(state.wallH, state.panelGap, state.enabledHeights);
 
-  if (!wSolutions.length || !hSolutions.length) {
-    return { layoutOptions: [], panels: [], colWidths: [], rowHeights: [] };
-  }
+  // Fallback: single-panel-full-wall so rendering never breaks
+  const fallback = (dim: number, enabled: number[]): AxisSolution => {
+    const size = enabled.length ? Math.max(...enabled) : dim;
+    return { counts: { [size]: 1 }, total: size, coverage: Math.min(1, size / dim), numPanels: 1 };
+  };
+  const wSafe = wSolutions.length ? wSolutions : [fallback(state.wallW, state.enabledWidths)];
+  const hSafe = hSolutions.length ? hSolutions : [fallback(state.wallH, state.enabledHeights)];
 
   const combos: LayoutOption[] = [];
-  const maxW = Math.min(wSolutions.length, 6);
-  const maxH = Math.min(hSolutions.length, 6);
+  const maxW = Math.min(wSafe.length, 6);
+  const maxH = Math.min(hSafe.length, 6);
   for (let wi = 0; wi < maxW; wi++) {
     for (let hi = 0; hi < maxH; hi++) {
-      const w = wSolutions[wi], h = hSolutions[hi];
+      const w = wSafe[wi], h = hSafe[hi];
       const totalCoverage = (w.coverage + h.coverage) / 2;
       const totalPanels = w.numPanels * h.numPanels;
       combos.push({
@@ -273,12 +279,21 @@ export function computeAllHoles(state: PanelState): { panels: Panel[]; gridInfo:
   return { panels, gridInfo: lastGridInfo };
 }
 
+// ─── Pricing constants ───────────────────────────────────────────────
+export const RATE_PANEL_PER_SF = 42;
+export const RATE_BACKLIGHT_SOLID_PER_SF = 50;
+export const RATE_BACKLIGHT_PROGRAMMABLE_PER_SF = 75;
+
 // ─── Statistics ──────────────────────────────────────────────────────
 export function computeStats(state: PanelState): {
   totalHoles: number;
   openAreaPct: number;
   sizesUsed: number;
   panelSF: number;
+  panelCost: number;
+  backlightRate: number;
+  backlightCost: number;
+  backlightType: 'none' | 'solid' | 'programmable';
   estimatedTotal: number;
 } {
   const panels = state.panels;
@@ -297,9 +312,47 @@ export function computeStats(state: PanelState): {
   const openAreaPct = totalArea > 0 ? (openArea / totalArea) * 100 : 0;
   const sizesUsed = Object.keys(sizeCounts).length;
   const panelSF = panels.reduce((s, p) => s + (p.w * p.h) / 144, 0);
-  const estimatedTotal = panelSF * 42;
+  const panelCost = panelSF * RATE_PANEL_PER_SF;
 
-  return { totalHoles, openAreaPct, sizesUsed, panelSF, estimatedTotal };
+  let backlightRate = 0;
+  let backlightType: 'none' | 'solid' | 'programmable' = 'none';
+  if (state.backlight) {
+    if (state.backlightMode === 'gradient') {
+      backlightRate = RATE_BACKLIGHT_PROGRAMMABLE_PER_SF;
+      backlightType = 'programmable';
+    } else {
+      backlightRate = RATE_BACKLIGHT_SOLID_PER_SF;
+      backlightType = 'solid';
+    }
+  }
+  const backlightCost = panelSF * backlightRate;
+  const estimatedTotal = panelCost + backlightCost;
+
+  return {
+    totalHoles, openAreaPct, sizesUsed, panelSF,
+    panelCost, backlightRate, backlightCost, backlightType,
+    estimatedTotal,
+  };
+}
+
+// ─── FAL Render Prompt Assembly ──────────────────────────────────────
+export function buildRenderPrompt(state: PanelState): string {
+  const parts: string[] = [
+    'Perforated metal panel wall, realistic architectural photography, luxury interior',
+  ];
+  if (state.backlight) {
+    if (state.backlightMode === 'gradient') {
+      parts.push(
+        `backlit with smooth gradient lighting from ${state.backlightColor} to ${state.backlightColor2} at ${state.backlightGradientAngle}°`,
+      );
+    } else {
+      parts.push(`backlit with warm ${state.backlightColor} glow`);
+    }
+    if (state.backlightIntensity >= 1.2) parts.push('intense dramatic backlight');
+    else if (state.backlightIntensity <= 0.5) parts.push('subtle soft backlight');
+  }
+  parts.push('keep exact hole pattern and scale, high detail, 8K');
+  return parts.join(', ');
 }
 
 // ─── Lighting Presets (from RibMaker) ────────────────────────────────

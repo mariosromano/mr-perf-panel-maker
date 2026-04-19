@@ -1,8 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type { PanelState } from '../engine/types';
 import { STANDARD_WIDTHS, STANDARD_HEIGHTS, STANDARD_HOLE_SIZES } from '../engine/types';
-import { computeStats } from '../engine/panelEngine';
-import { exportSVG, exportDXF, exportPNG } from '../engine/exportEngine';
+import { computeStats, buildRenderPrompt, RATE_PANEL_PER_SF } from '../engine/panelEngine';
+import { exportDXF, exportPNG, exportShopDrawingPDF } from '../engine/exportEngine';
 
 interface ControlPanelProps {
   panelState: PanelState;
@@ -20,6 +20,7 @@ interface ControlPanelProps {
   sceneRef: React.RefObject<unknown>;
   cameraRef: React.RefObject<unknown>;
   activeTab: '2d' | '3d' | 'guide';
+  onOpenAskMara: () => void;
 }
 
 function Section({ title, children, defaultOpen = true }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
@@ -27,13 +28,13 @@ function Section({ title, children, defaultOpen = true }: { title: string; child
   return (
     <div className="border-b border-[#3a3a3e]">
       <button
-        className="w-full flex items-center justify-between px-4 py-2.5 text-left"
+        className="w-full flex items-center justify-between pl-5 pr-6 py-2.5 text-left"
         onClick={() => setOpen(!open)}
       >
         <span className="text-[11px] font-semibold text-[#888] uppercase tracking-wider">{title}</span>
         <span className="text-[#666] text-[10px]">{open ? '\u25B2' : '\u25BC'}</span>
       </button>
-      {open && <div className="px-4 pb-3.5 pt-0.5">{children}</div>}
+      {open && <div className="pl-5 pr-6 pb-3.5 pt-0.5">{children}</div>}
     </div>
   );
 }
@@ -47,7 +48,6 @@ function Slider({
   const [localValue, setLocalValue] = useState(value);
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  // Sync from parent when not dragging
   useEffect(() => { setLocalValue(value); }, [value]);
 
   const handleChange = (v: number) => {
@@ -95,7 +95,7 @@ function SizeToggleGroup({
 }) {
   const toggle = (size: number) => {
     const isActive = enabled.includes(size);
-    if (isActive && enabled.length <= 1) return; // prevent disabling all
+    if (isActive && enabled.length <= 1) return;
     const next = isActive ? enabled.filter(s => s !== size) : [...enabled, size];
     onChange(next);
   };
@@ -130,6 +130,13 @@ function SizeToggleGroup({
   );
 }
 
+// Density slider: 0 (sparse, 5" spacing) → 100 (dense, 1.25" spacing)
+const DENSITY_MIN_SPACING = 1.25;
+const DENSITY_MAX_SPACING = 5;
+const densityToSpacing = (d: number) => DENSITY_MAX_SPACING - (d / 100) * (DENSITY_MAX_SPACING - DENSITY_MIN_SPACING);
+const spacingToDensity = (s: number) =>
+  Math.round(((DENSITY_MAX_SPACING - s) / (DENSITY_MAX_SPACING - DENSITY_MIN_SPACING)) * 100);
+
 export default function ControlPanel({
   panelState,
   onStateChange,
@@ -146,11 +153,41 @@ export default function ControlPanel({
   sceneRef,
   cameraRef,
   activeTab,
+  onOpenAskMara,
 }: ControlPanelProps) {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [exportTarget, setExportTarget] = useState('all');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showSamples, setShowSamples] = useState(false);
+
+  // FAL render state (moved from ChatPanel)
+  const [rendering, setRendering] = useState(false);
+  const [renderResult, setRenderResult] = useState<string | null>(null);
+  const [renderError, setRenderError] = useState<string | null>(null);
+  const [renderProgress, setRenderProgress] = useState(0);
+  const [renderStartTime, setRenderStartTime] = useState<number | null>(null);
+  const renderTimerRef = useRef<ReturnType<typeof setInterval>>(undefined);
+  const [falKey, setFalKey] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('perfpanel_fal_key') ?? '' : ''));
+  const [serverHasFalKey, setServerHasFalKey] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/config')
+      .then(r => r.json())
+      .then(cfg => { if (cfg.hasFalKey) setServerHasFalKey(true); })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (rendering && renderStartTime) {
+      renderTimerRef.current = setInterval(() => {
+        const elapsed = (Date.now() - renderStartTime) / 1000;
+        setRenderProgress(90 * (1 - Math.exp(-elapsed / 8)));
+      }, 100);
+      return () => clearInterval(renderTimerRef.current);
+    } else {
+      clearInterval(renderTimerRef.current);
+    }
+  }, [rendering, renderStartTime]);
 
   const stats = computeStats(panelState);
 
@@ -161,8 +198,9 @@ export default function ControlPanel({
       reader.readAsDataURL(file);
     });
     setImagePreview(dataUrl);
+    onStateChange({ imageName: file.name.replace(/\.[^.]+$/, '') });
     onImageLoad(file);
-  }, [onImageLoad]);
+  }, [onImageLoad, onStateChange]);
 
   const handleClearImage = useCallback(() => {
     setImagePreview(null);
@@ -174,7 +212,7 @@ export default function ControlPanel({
     if (e.dataTransfer.files.length > 0) handleImageUpload(e.dataTransfer.files[0]);
   }, [handleImageUpload]);
 
-  const handleSampleSelect = useCallback((filename: string) => {
+  const handleSampleSelect = useCallback((filename: string, label: string) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
@@ -187,11 +225,12 @@ export default function ControlPanel({
         if (!blob) return;
         const file = new File([blob], filename, { type: 'image/jpeg' });
         setImagePreview(`/samples/${filename}`);
+        onStateChange({ imageName: label });
         onImageLoad(file);
       }, 'image/jpeg', 0.92);
     };
     img.src = `/samples/${filename}`;
-  }, [onImageLoad]);
+  }, [onImageLoad, onStateChange]);
 
   const fmtPrice = (n: number) =>
     '$' + n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -216,13 +255,99 @@ export default function ControlPanel({
     }
   };
 
+  const handleExportPDF = () => {
+    exportShopDrawingPDF(panelState);
+  };
+
+  // Capture screenshot of 3D viewport for FAL
+  const captureScreenshot = useCallback((): string | null => {
+    const renderer = rendererRef.current as { render: (s: unknown, c: unknown) => void; domElement: HTMLCanvasElement } | null;
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+    if (!renderer || !scene || !camera) return null;
+    renderer.render(scene, camera);
+    const canvas = renderer.domElement;
+    const maxDim = 1536;
+    let w = canvas.width, h = canvas.height;
+    if (w > maxDim || h > maxDim) {
+      const ratio = maxDim / Math.max(w, h);
+      w = Math.round(w * ratio);
+      h = Math.round(h * ratio);
+    }
+    const offscreen = document.createElement('canvas');
+    offscreen.width = w;
+    offscreen.height = h;
+    const ctx = offscreen.getContext('2d');
+    if (!ctx) return canvas.toDataURL('image/jpeg', 0.85);
+    ctx.drawImage(canvas, 0, 0, w, h);
+    return offscreen.toDataURL('image/jpeg', 0.85);
+  }, [rendererRef, sceneRef, cameraRef]);
+
+  const handleFalKeyChange = useCallback((val: string) => {
+    setFalKey(val);
+    localStorage.setItem('perfpanel_fal_key', val);
+  }, []);
+
+  const handleRender = useCallback(async () => {
+    if (!falKey && !serverHasFalKey) {
+      setRenderError('Enter your FAL API key in Advanced first.');
+      return;
+    }
+    setRendering(true);
+    setRenderError(null);
+    setRenderResult(null);
+    setRenderProgress(0);
+    setRenderStartTime(Date.now());
+    try {
+      const dataUrl = captureScreenshot();
+      if (!dataUrl) throw new Error('Could not capture screenshot');
+      const base64 = dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
+      const prompt = buildRenderPrompt(panelState);
+      const renderHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (falKey) renderHeaders['x-fal-key'] = falKey;
+      const res = await fetch('/api/render', {
+        method: 'POST',
+        headers: renderHeaders,
+        body: JSON.stringify({ image: base64, prompt }),
+      });
+      const text = await res.text();
+      let data: Record<string, unknown>;
+      try { data = JSON.parse(text); } catch { throw new Error(`Server error (${res.status}): ${text.slice(0, 120)}`); }
+      if (!res.ok) throw new Error((data.error as string) || 'Render failed');
+      setRenderProgress(100);
+      setRenderResult(data.imageUrl as string);
+    } catch (err: unknown) {
+      setRenderError(err instanceof Error ? err.message : 'Render failed');
+    } finally {
+      setRendering(false);
+      setRenderStartTime(null);
+    }
+  }, [falKey, serverHasFalKey, panelState, captureScreenshot]);
+
+  const density = spacingToDensity(panelState.spacingX);
+  const handleDensityChange = (d: number) => {
+    const sp = densityToSpacing(d);
+    onStateChange({ spacingMode: 'spacing', spacingX: sp, spacingY: sp, lockRatio: true });
+  };
+
   return (
-    <div className="w-[320px] min-w-[320px] bg-[#222226] h-screen overflow-y-auto border-r border-[#3a3a3e] flex flex-col">
-      {/* Brand */}
-      <div className="px-5 py-4 border-b border-[#3a3a3e] bg-gradient-to-br from-[#2a2a2e] to-[#1a1a1e]">
-        <div className="text-[15px] font-bold tracking-wider">
-          <span className="text-[#4a9eff]">M|R</span> Walls Perf Panel Maker
+    <div className="w-[360px] min-w-[360px] bg-[#222226] h-screen overflow-y-auto border-l border-[#3a3a3e] flex flex-col">
+      {/* Brand + Ask Mara */}
+      <div className="pl-5 pr-6 py-3.5 border-b border-[#3a3a3e] bg-gradient-to-br from-[#2a2a2e] to-[#17171a] flex items-center justify-between gap-3">
+        <div className="shrink-0">
+          <div className="text-[14px] font-bold tracking-wider leading-none">
+            <span className="text-[#4a9eff]">M|R</span> <span className="text-white">Walls</span>
+          </div>
+          <div className="text-[9px] font-mono text-[#555] tracking-widest uppercase mt-1">CO-PRF-02</div>
         </div>
+        <button
+          onClick={onOpenAskMara}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold bg-gradient-to-br from-[#4a9eff] to-[#8a5aff] text-white hover:brightness-110 hover:scale-[1.03] active:scale-[0.98] transition-all shrink-0 shadow-[0_2px_12px_rgba(74,158,255,0.35)]"
+          title="Ask Mara to adjust the sliders via natural language"
+        >
+          <span className="w-4 h-4 rounded-full bg-white/25 flex items-center justify-center text-[9px]">M</span>
+          Ask Mara
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto">
@@ -245,9 +370,7 @@ export default function ControlPanel({
                 </button>
               </>
             ) : (
-              <>
-                <p className="text-[13px] text-[#888]">Drop image here or click to browse</p>
-              </>
+              <p className="text-[13px] text-[#888]">Drop image here or click to browse</p>
             )}
           </div>
           <input
@@ -286,16 +409,11 @@ export default function ControlPanel({
               ].map(s => (
                 <button
                   key={s.file}
-                  onClick={() => handleSampleSelect(s.file)}
+                  onClick={() => handleSampleSelect(s.file, s.label)}
                   className="group relative aspect-square rounded overflow-hidden border border-[#3a3a3e] cursor-pointer hover:border-[#4a9eff] transition-colors"
                   title={s.label}
                 >
-                  <img
-                    src={`/samples/${s.file}`}
-                    alt={s.label}
-                    loading="lazy"
-                    className="w-full h-full object-cover"
-                  />
+                  <img src={`/samples/${s.file}`} alt={s.label} loading="lazy" className="w-full h-full object-cover" />
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-end justify-center">
                     <span className="text-[8px] text-white opacity-0 group-hover:opacity-100 transition-opacity pb-0.5 font-medium">{s.label}</span>
                   </div>
@@ -306,7 +424,7 @@ export default function ControlPanel({
           <Toggle label="Invert Image" checked={panelState.invert} onChange={v => onStateChange({ invert: v })} />
         </Section>
 
-        {/* Wall Dimensions */}
+        {/* Wall Dimensions — W / H only in default; Gap in Advanced */}
         <Section title="Wall Dimensions">
           <div className="flex gap-2 mb-2">
             <label className="flex items-center justify-between flex-1 text-[13px]">
@@ -330,167 +448,20 @@ export default function ControlPanel({
               />
             </label>
           </div>
-          <label className="flex items-center justify-between text-[13px]">
-            <span className="text-[#888]">Gap (in)</span>
-            <input
-              type="number"
-              className="w-16 bg-[#2a2a2e] border border-[#3a3a3e] text-[#e0e0e0] rounded px-1.5 py-1 text-[13px] text-right"
-              value={panelState.panelGap}
-              min={0} max={4} step={0.0625}
-              onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v) && v >= 0) onStateChange({ panelGap: v }); }}
-            />
-          </label>
         </Section>
 
-        {/* Panel Layout */}
-        <Section title="Panel Layout">
-          <div className="text-[11px] text-[#888] mb-1">Available widths</div>
-          <SizeToggleGroup
-            sizes={STANDARD_WIDTHS}
-            enabled={panelState.enabledWidths}
-            onChange={enabledWidths => onStateChange({ enabledWidths })}
+        {/* Pattern — density + grid pattern */}
+        <Section title="Pattern">
+          <Slider
+            label="Density"
+            value={density}
+            min={0} max={100} step={1}
+            format={v => `${v}%`}
+            onChange={handleDensityChange}
+            info={`Hole spacing: ${densityToSpacing(density).toFixed(2)}"`}
           />
-          <div className="text-[11px] text-[#888] mb-1">Available heights</div>
-          <SizeToggleGroup
-            sizes={STANDARD_HEIGHTS}
-            enabled={panelState.enabledHeights}
-            onChange={enabledHeights => onStateChange({ enabledHeights })}
-          />
-          <div className="text-[11px] text-[#888] mb-1">Layout option</div>
-          <select
-            className="w-full mb-2 bg-[#2a2a2e] border border-[#3a3a3e] text-[#e0e0e0] rounded px-2 py-1 text-[12px]"
-            value={panelState.selectedLayoutIdx}
-            onChange={e => onStateChange({ selectedLayoutIdx: parseInt(e.target.value) })}
-          >
-            {panelState.layoutOptions.map((opt, i) => (
-              <option key={i} value={i}>
-                {opt.desc} — {opt.totalPanels} panels, {(opt.totalCoverage * 100).toFixed(1)}%
-              </option>
-            ))}
-          </select>
-          <Slider label="Margin (in)" value={panelState.margin} min={0} max={6} step={0.25}
-            onChange={v => onStateChange({ margin: v })} />
-
-          {/* Layout info */}
-          {panelState.panels.length > 0 && (
-            <div className="text-[11px] text-[#e0e0e0] mt-1.5 p-2 bg-[rgba(74,158,255,0.06)] border border-[#3a3a3e] rounded leading-relaxed">
-              <span className="text-[#888]">Cols:</span> {panelState.colWidths.map(w => `${w}"`).join(' | ')}<br/>
-              <span className="text-[#888]">Rows:</span> {panelState.rowHeights.map(h => `${h}"`).join(' | ')}<br/>
-              <span className="text-[#4a9eff] font-semibold">{panelState.colWidths.length} x {panelState.rowHeights.length} = {panelState.panels.length} panels</span>
-            </div>
-          )}
-        </Section>
-
-        {/* Advanced Toggle */}
-        <div className="px-4 py-2.5 border-b border-[#3a3a3e]">
-          <button
-            className={`w-full py-2 border rounded-md text-[11px] cursor-pointer font-semibold transition-colors ${
-              showAdvanced
-                ? 'bg-[#2a2a3e] border-[#4a9eff] text-[#4a9eff]'
-                : 'bg-transparent border-[#3a3a3e] text-[#888] hover:text-[#ccc] hover:border-[#555]'
-            }`}
-            onClick={() => setShowAdvanced(!showAdvanced)}
-          >
-            {showAdvanced ? 'Hide Advanced Settings' : 'Show Advanced Settings'}
-          </button>
-        </div>
-
-        {/* Image Adjustments (Advanced) */}
-        {showAdvanced && (
-          <Section title="Image Adjustments">
-            <Slider label="Brightness" value={panelState.brightness} min={-100} max={100} step={1}
-              onChange={v => onStateChange({ brightness: v })} />
-            <Slider label="Contrast" value={panelState.contrast} min={-100} max={100} step={1}
-              onChange={v => onStateChange({ contrast: v })} />
-          </Section>
-        )}
-
-        {/* Grid Settings (Advanced) */}
-        {showAdvanced && <Section title="Grid Settings">
-          <div className="flex items-center justify-between mb-2 text-[13px]">
-            <span className="text-[#e0e0e0]">Spacing Mode</span>
-            <div className="flex gap-1">
-              {(['spacing', 'count'] as const).map(m => (
-                <button
-                  key={m}
-                  className={`px-2.5 py-1 text-[11px] border rounded transition-all ${
-                    panelState.spacingMode === m
-                      ? 'border-[#4a9eff] bg-[rgba(74,158,255,0.15)] text-[#e0e0e0]'
-                      : 'border-[#3a3a3e] bg-[#2a2a2e] text-[#888]'
-                  }`}
-                  onClick={() => onStateChange({ spacingMode: m })}
-                >
-                  {m.charAt(0).toUpperCase() + m.slice(1)}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {panelState.spacingMode === 'spacing' ? (
-            <div className="flex gap-2 items-center mb-2">
-              <label className="flex items-center gap-1 flex-1 text-[13px]">
-                <span className="text-[#888]">X (in)</span>
-                <input
-                  type="number"
-                  className="w-16 bg-[#2a2a2e] border border-[#3a3a3e] text-[#e0e0e0] rounded px-1.5 py-1 text-[13px] text-right"
-                  value={panelState.spacingX} min={2} max={12} step={0.05}
-                  onChange={e => {
-                    const v = Math.max(panelState.minSpacing, parseFloat(e.target.value) || 2);
-                    const updates: Partial<PanelState> = { spacingX: v };
-                    if (panelState.lockRatio) updates.spacingY = v;
-                    onStateChange(updates);
-                  }}
-                />
-              </label>
-              <button
-                className={`w-6 h-6 flex items-center justify-center text-xs border rounded shrink-0 ${
-                  panelState.lockRatio ? 'text-[#4a9eff] border-[#4a9eff]' : 'text-[#888] border-[#3a3a3e]'
-                }`}
-                onClick={() => onStateChange({ lockRatio: !panelState.lockRatio })}
-                title="Lock ratio"
-              >
-                &#128279;
-              </button>
-              <label className="flex items-center gap-1 flex-1 text-[13px]">
-                <span className="text-[#888]">Y (in)</span>
-                <input
-                  type="number"
-                  className="w-16 bg-[#2a2a2e] border border-[#3a3a3e] text-[#e0e0e0] rounded px-1.5 py-1 text-[13px] text-right"
-                  value={panelState.spacingY} min={2} max={12} step={0.05}
-                  onChange={e => {
-                    const v = Math.max(panelState.minSpacing, parseFloat(e.target.value) || 2);
-                    const updates: Partial<PanelState> = { spacingY: v };
-                    if (panelState.lockRatio) updates.spacingX = v;
-                    onStateChange(updates);
-                  }}
-                />
-              </label>
-            </div>
-          ) : (
-            <div className="flex gap-2 mb-2">
-              <label className="flex items-center gap-1 flex-1 text-[13px]">
-                <span className="text-[#888]">Cols</span>
-                <input
-                  type="number"
-                  className="w-16 bg-[#2a2a2e] border border-[#3a3a3e] text-[#e0e0e0] rounded px-1.5 py-1 text-[13px] text-right"
-                  value={panelState.gridCols} min={2} max={500} step={1}
-                  onChange={e => onStateChange({ gridCols: parseInt(e.target.value) || 46 })}
-                />
-              </label>
-              <label className="flex items-center gap-1 flex-1 text-[13px]">
-                <span className="text-[#888]">Rows</span>
-                <input
-                  type="number"
-                  className="w-16 bg-[#2a2a2e] border border-[#3a3a3e] text-[#e0e0e0] rounded px-1.5 py-1 text-[13px] text-right"
-                  value={panelState.gridRows} min={2} max={500} step={1}
-                  onChange={e => onStateChange({ gridRows: parseInt(e.target.value) || 118 })}
-                />
-              </label>
-            </div>
-          )}
-
-          <div className="flex items-center justify-between mb-2 text-[13px]">
-            <span className="text-[#e0e0e0]">Grid Pattern</span>
+          <div className="flex items-center justify-between mt-3 mb-1 text-[13px]">
+            <span className="text-[#e0e0e0]">Grid</span>
             <div className="flex gap-1">
               {(['rect', 'hex'] as const).map(p => (
                 <button
@@ -507,49 +478,346 @@ export default function ControlPanel({
               ))}
             </div>
           </div>
-        </Section>}
+        </Section>
 
-        {/* Hole Settings (Advanced) */}
-        {showAdvanced && (
-          <Section title="Hole Settings">
-            <div className="text-[11px] text-[#888] mb-1">Standard sizes (in)</div>
-            <SizeToggleGroup
-              sizes={STANDARD_HOLE_SIZES}
-              enabled={panelState.enabledHoleSizes}
-              onChange={enabledHoleSizes => onStateChange({ enabledHoleSizes })}
+        {/* Appearance — colors + backlight */}
+        <Section title="Appearance">
+          <label className="flex items-center justify-between mb-2 text-[13px]">
+            <span className="text-[#e0e0e0]">Panel Color</span>
+            <input
+              type="color"
+              className="w-8 h-6 border border-[#3a3a3e] rounded cursor-pointer bg-transparent p-0.5"
+              value={panelState.panelColor}
+              onChange={e => onStateChange({ panelColor: e.target.value })}
             />
-            <Slider label="Threshold" value={panelState.threshold} min={0} max={255} step={1}
-              onChange={v => onStateChange({ threshold: v })} />
-            <Slider label="Gamma" value={panelState.gamma} min={0.2} max={5} step={0.1}
-              format={v => v.toFixed(1)} onChange={v => onStateChange({ gamma: v })} />
-          </Section>
-        )}
+          </label>
+          <label className="flex items-center justify-between mb-2 text-[13px]">
+            <span className="text-[#e0e0e0]">Background</span>
+            <input
+              type="color"
+              className="w-8 h-6 border border-[#3a3a3e] rounded cursor-pointer bg-transparent p-0.5"
+              value={panelState.bgColor}
+              onChange={e => onStateChange({ bgColor: e.target.value })}
+            />
+          </label>
+          <Toggle label="Backlight" checked={panelState.backlight} onChange={v => onStateChange({ backlight: v })} />
+          {panelState.backlight && (
+            <>
+              <label className="flex items-center justify-between mb-2 text-[13px]">
+                <span className="text-[#e0e0e0]">Backlight Color</span>
+                <input
+                  type="color"
+                  className="w-8 h-6 border border-[#3a3a3e] rounded cursor-pointer bg-transparent p-0.5"
+                  value={panelState.backlightColor}
+                  onChange={e => onStateChange({ backlightColor: e.target.value })}
+                />
+              </label>
+              <Slider label="Intensity" value={panelState.backlightIntensity} min={0} max={2} step={0.05}
+                format={v => v.toFixed(1)} onChange={v => onStateChange({ backlightIntensity: v })} />
+            </>
+          )}
+        </Section>
 
-        {/* Visualization (Advanced) */}
+        {/* Spec + Pricing — itemized quote card */}
+        <div className="pl-5 pr-6 py-3 border-b border-[#3a3a3e] bg-[#1c1c20]">
+          {/* Spec line */}
+          <div className="flex items-center justify-between text-[10px] font-mono text-[#666] uppercase tracking-widest mb-2.5">
+            <span>Spec</span>
+            <span>
+              {(panelState.wallW / 12).toFixed(1)}' × {(panelState.wallH / 12).toFixed(1)}' · {panelState.panels.length || 0} panels · {stats.totalHoles ? `${stats.openAreaPct.toFixed(0)}% open` : '—'}
+            </span>
+          </div>
+
+          {/* Pricing card */}
+          <div className="bg-[#222226] border border-[#3a3a3e] rounded-lg overflow-hidden">
+            <div className="px-3 py-2 border-b border-[#3a3a3e] flex items-center justify-between">
+              <span className="text-[10px] font-semibold text-[#888] uppercase tracking-widest">Estimate</span>
+              <span className="text-[10px] font-mono text-[#555]">{stats.panelSF > 0 ? `${stats.panelSF.toFixed(0)} SF` : '—'}</span>
+            </div>
+
+            {/* Line items */}
+            <div className="divide-y divide-[#2a2a2e]">
+              <div className="px-3 py-2 flex items-baseline justify-between text-[12px]">
+                <div className="flex flex-col">
+                  <span className="text-[#e0e0e0]">Perforated panels</span>
+                  <span className="text-[10px] font-mono text-[#666]">
+                    {stats.panelSF > 0 ? `${stats.panelSF.toFixed(0)} SF × $${RATE_PANEL_PER_SF}/SF` : `$${RATE_PANEL_PER_SF}/SF`}
+                  </span>
+                </div>
+                <span className="text-[#e0e0e0] font-mono font-semibold shrink-0">
+                  {stats.panelCost > 0 ? fmtPrice(stats.panelCost) : '—'}
+                </span>
+              </div>
+
+              {panelState.backlight && (
+                <div className="px-3 py-2 flex items-baseline justify-between text-[12px]">
+                  <div className="flex flex-col">
+                    <span className="text-[#e0e0e0]">
+                      {stats.backlightType === 'programmable' ? 'Programmable RGB backlight' : 'RGB backlight'}
+                    </span>
+                    <span className="text-[10px] font-mono text-[#666]">
+                      {stats.panelSF > 0 ? `${stats.panelSF.toFixed(0)} SF × $${stats.backlightRate}/SF` : `$${stats.backlightRate}/SF`}
+                      {stats.backlightType === 'programmable' ? ' · gradient/DMX' : ' · solid'}
+                    </span>
+                  </div>
+                  <span className="text-[#e0e0e0] font-mono font-semibold shrink-0">
+                    {stats.backlightCost > 0 ? fmtPrice(stats.backlightCost) : '—'}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Total */}
+            <div className="px-3 py-2.5 bg-[rgba(74,158,255,0.06)] border-t border-[#3a3a3e] flex items-center justify-between">
+              <span className="text-[12px] font-semibold text-[#e0e0e0]">Estimated Total</span>
+              <span className="text-[15px] font-mono font-bold text-[#4a9eff]">
+                {stats.estimatedTotal > 0 ? fmtPrice(stats.estimatedTotal) : '—'}
+              </span>
+            </div>
+          </div>
+
+          <p className="text-[10px] text-[#555] mt-2 leading-relaxed">
+            Estimate only. Mounting hardware, power/DMX wiring, and installation quoted separately.
+          </p>
+        </div>
+
+        {/* Export — DXF / PNG / PDF + Render */}
+        <Section title="Export">
+          <select
+            className="w-full mb-2 bg-[#2a2a2e] border border-[#3a3a3e] text-[#e0e0e0] rounded px-2 py-1.5 text-[13px]"
+            value={exportTarget}
+            onChange={e => setExportTarget(e.target.value)}
+          >
+            <option value="all">All Panels (Full Wall)</option>
+            {panelState.panels.map(p => (
+              <option key={p.label} value={p.label}>Panel {p.label} ({p.sizeLabel})</option>
+            ))}
+          </select>
+          <div className="flex gap-2 mb-2">
+            <button
+              className="flex-1 py-2 text-[13px] font-semibold border border-[#3a3a3e] bg-[#2a2a2e] text-[#e0e0e0] rounded-md hover:border-[#4a9eff] hover:bg-[rgba(74,158,255,0.1)] transition-all"
+              onClick={() => exportDXF(panelState, getExportPanels())}
+            >
+              DXF
+            </button>
+            <button
+              className="flex-1 py-2 text-[13px] font-semibold border border-[#3a3a3e] bg-[#2a2a2e] text-[#e0e0e0] rounded-md hover:border-[#4a9eff] hover:bg-[rgba(74,158,255,0.1)] transition-all"
+              onClick={handleExportPNG}
+            >
+              PNG
+            </button>
+            <button
+              className="flex-1 py-2 text-[13px] font-semibold border border-[#3a3a3e] bg-[#2a2a2e] text-[#e0e0e0] rounded-md hover:border-[#4a9eff] hover:bg-[rgba(74,158,255,0.1)] transition-all"
+              onClick={handleExportPDF}
+              title="Shop Drawing PDF (coming soon)"
+            >
+              PDF
+            </button>
+          </div>
+          <button
+            onClick={handleRender}
+            disabled={rendering || (!falKey && !serverHasFalKey)}
+            className={`w-full py-2.5 rounded-md text-[13px] font-bold text-white transition-all ${
+              rendering || (!falKey && !serverHasFalKey)
+                ? 'bg-[#555] cursor-default'
+                : 'bg-gradient-to-br from-[#7a5aaa] to-[#5a3a8a] cursor-pointer hover:brightness-110'
+            }`}
+          >
+            {rendering ? `Rendering... ${Math.round(renderProgress)}%` : 'Render Realistic'}
+          </button>
+          {rendering && (
+            <div className="mt-2 w-full h-1.5 bg-[#2a2a2e] rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-200 ease-out"
+                style={{
+                  width: `${Math.round(renderProgress)}%`,
+                  background: 'linear-gradient(90deg, #7a5aaa, #5a3a8a)',
+                }}
+              />
+            </div>
+          )}
+          {renderError && (
+            <div className="mt-2 px-2 py-1.5 rounded bg-[#4a2a2a] text-[#ff6b6b] text-[11px]">{renderError}</div>
+          )}
+        </Section>
+
+        {/* Advanced toggle */}
+        <div className="pl-5 pr-6 py-2.5 border-b border-[#3a3a3e]">
+          <button
+            className={`w-full py-2 border rounded-md text-[11px] cursor-pointer font-semibold transition-colors ${
+              showAdvanced
+                ? 'bg-[#2a2a3e] border-[#4a9eff] text-[#4a9eff]'
+                : 'bg-transparent border-[#3a3a3e] text-[#888] hover:text-[#ccc] hover:border-[#555]'
+            }`}
+            onClick={() => setShowAdvanced(!showAdvanced)}
+          >
+            {showAdvanced ? 'Hide Advanced Settings' : 'Show Advanced Settings'}
+          </button>
+        </div>
+
         {showAdvanced && (
-          <Section title="Visualization">
-            <label className="flex items-center justify-between mb-2 text-[13px]">
-              <span className="text-[#e0e0e0]">Panel Color</span>
-              <input
-                type="color"
-                className="w-8 h-6 border border-[#3a3a3e] rounded cursor-pointer bg-transparent p-0.5"
-                value={panelState.panelColor}
-                onChange={e => onStateChange({ panelColor: e.target.value })}
+          <>
+            {/* Advanced: Gap */}
+            <Section title="Panel Gap" defaultOpen={false}>
+              <label className="flex items-center justify-between text-[13px]">
+                <span className="text-[#888]">Gap (in)</span>
+                <input
+                  type="number"
+                  className="w-16 bg-[#2a2a2e] border border-[#3a3a3e] text-[#e0e0e0] rounded px-1.5 py-1 text-[13px] text-right"
+                  value={panelState.panelGap}
+                  min={0} max={4} step={0.0625}
+                  onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v) && v >= 0) onStateChange({ panelGap: v }); }}
+                />
+              </label>
+            </Section>
+
+            {/* Advanced: Panel Layout */}
+            <Section title="Panel Layout" defaultOpen={false}>
+              <div className="text-[11px] text-[#888] mb-1">Available widths</div>
+              <SizeToggleGroup
+                sizes={STANDARD_WIDTHS}
+                enabled={panelState.enabledWidths}
+                onChange={enabledWidths => onStateChange({ enabledWidths })}
               />
-            </label>
-            <label className="flex items-center justify-between mb-2 text-[13px]">
-              <span className="text-[#e0e0e0]">Background</span>
-              <input
-                type="color"
-                className="w-8 h-6 border border-[#3a3a3e] rounded cursor-pointer bg-transparent p-0.5"
-                value={panelState.bgColor}
-                onChange={e => onStateChange({ bgColor: e.target.value })}
+              <div className="text-[11px] text-[#888] mb-1">Available heights</div>
+              <SizeToggleGroup
+                sizes={STANDARD_HEIGHTS}
+                enabled={panelState.enabledHeights}
+                onChange={enabledHeights => onStateChange({ enabledHeights })}
               />
-            </label>
-            <Toggle label="Backlight" checked={panelState.backlight} onChange={v => onStateChange({ backlight: v })} />
+              <div className="text-[11px] text-[#888] mb-1">Layout option</div>
+              <select
+                className="w-full mb-2 bg-[#2a2a2e] border border-[#3a3a3e] text-[#e0e0e0] rounded px-2 py-1 text-[12px]"
+                value={panelState.selectedLayoutIdx}
+                onChange={e => onStateChange({ selectedLayoutIdx: parseInt(e.target.value) })}
+              >
+                {panelState.layoutOptions.map((opt, i) => (
+                  <option key={i} value={i}>
+                    {opt.desc} — {opt.totalPanels} panels, {(opt.totalCoverage * 100).toFixed(1)}%
+                  </option>
+                ))}
+              </select>
+              <Slider label="Margin (in)" value={panelState.margin} min={0} max={6} step={0.25}
+                onChange={v => onStateChange({ margin: v })} />
+              {panelState.panels.length > 0 && (
+                <div className="text-[11px] text-[#e0e0e0] mt-1.5 p-2 bg-[rgba(74,158,255,0.06)] border border-[#3a3a3e] rounded leading-relaxed">
+                  <span className="text-[#888]">Cols:</span> {panelState.colWidths.map(w => `${w}"`).join(' | ')}<br/>
+                  <span className="text-[#888]">Rows:</span> {panelState.rowHeights.map(h => `${h}"`).join(' | ')}<br/>
+                  <span className="text-[#4a9eff] font-semibold">{panelState.colWidths.length} x {panelState.rowHeights.length} = {panelState.panels.length} panels</span>
+                </div>
+              )}
+            </Section>
+
+            {/* Advanced: Image Adjustments */}
+            <Section title="Image Adjustments" defaultOpen={false}>
+              <Slider label="Brightness" value={panelState.brightness} min={-100} max={100} step={1}
+                onChange={v => onStateChange({ brightness: v })} />
+              <Slider label="Contrast" value={panelState.contrast} min={-100} max={100} step={1}
+                onChange={v => onStateChange({ contrast: v })} />
+            </Section>
+
+            {/* Advanced: Grid Settings */}
+            <Section title="Grid Settings" defaultOpen={false}>
+              <div className="flex items-center justify-between mb-2 text-[13px]">
+                <span className="text-[#e0e0e0]">Spacing Mode</span>
+                <div className="flex gap-1">
+                  {(['spacing', 'count'] as const).map(m => (
+                    <button
+                      key={m}
+                      className={`px-2.5 py-1 text-[11px] border rounded transition-all ${
+                        panelState.spacingMode === m
+                          ? 'border-[#4a9eff] bg-[rgba(74,158,255,0.15)] text-[#e0e0e0]'
+                          : 'border-[#3a3a3e] bg-[#2a2a2e] text-[#888]'
+                      }`}
+                      onClick={() => onStateChange({ spacingMode: m })}
+                    >
+                      {m.charAt(0).toUpperCase() + m.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {panelState.spacingMode === 'spacing' ? (
+                <div className="flex gap-2 items-center mb-2">
+                  <label className="flex items-center gap-1 flex-1 text-[13px]">
+                    <span className="text-[#888]">X (in)</span>
+                    <input
+                      type="number"
+                      className="w-16 bg-[#2a2a2e] border border-[#3a3a3e] text-[#e0e0e0] rounded px-1.5 py-1 text-[13px] text-right"
+                      value={panelState.spacingX} min={2} max={12} step={0.05}
+                      onChange={e => {
+                        const v = Math.max(panelState.minSpacing, parseFloat(e.target.value) || 2);
+                        const updates: Partial<PanelState> = { spacingX: v };
+                        if (panelState.lockRatio) updates.spacingY = v;
+                        onStateChange(updates);
+                      }}
+                    />
+                  </label>
+                  <button
+                    className={`w-6 h-6 flex items-center justify-center text-xs border rounded shrink-0 ${
+                      panelState.lockRatio ? 'text-[#4a9eff] border-[#4a9eff]' : 'text-[#888] border-[#3a3a3e]'
+                    }`}
+                    onClick={() => onStateChange({ lockRatio: !panelState.lockRatio })}
+                    title="Lock ratio"
+                  >
+                    &#128279;
+                  </button>
+                  <label className="flex items-center gap-1 flex-1 text-[13px]">
+                    <span className="text-[#888]">Y (in)</span>
+                    <input
+                      type="number"
+                      className="w-16 bg-[#2a2a2e] border border-[#3a3a3e] text-[#e0e0e0] rounded px-1.5 py-1 text-[13px] text-right"
+                      value={panelState.spacingY} min={2} max={12} step={0.05}
+                      onChange={e => {
+                        const v = Math.max(panelState.minSpacing, parseFloat(e.target.value) || 2);
+                        const updates: Partial<PanelState> = { spacingY: v };
+                        if (panelState.lockRatio) updates.spacingX = v;
+                        onStateChange(updates);
+                      }}
+                    />
+                  </label>
+                </div>
+              ) : (
+                <div className="flex gap-2 mb-2">
+                  <label className="flex items-center gap-1 flex-1 text-[13px]">
+                    <span className="text-[#888]">Cols</span>
+                    <input
+                      type="number"
+                      className="w-16 bg-[#2a2a2e] border border-[#3a3a3e] text-[#e0e0e0] rounded px-1.5 py-1 text-[13px] text-right"
+                      value={panelState.gridCols} min={2} max={500} step={1}
+                      onChange={e => onStateChange({ gridCols: parseInt(e.target.value) || 46 })}
+                    />
+                  </label>
+                  <label className="flex items-center gap-1 flex-1 text-[13px]">
+                    <span className="text-[#888]">Rows</span>
+                    <input
+                      type="number"
+                      className="w-16 bg-[#2a2a2e] border border-[#3a3a3e] text-[#e0e0e0] rounded px-1.5 py-1 text-[13px] text-right"
+                      value={panelState.gridRows} min={2} max={500} step={1}
+                      onChange={e => onStateChange({ gridRows: parseInt(e.target.value) || 118 })}
+                    />
+                  </label>
+                </div>
+              )}
+            </Section>
+
+            {/* Advanced: Hole Settings */}
+            <Section title="Hole Settings" defaultOpen={false}>
+              <div className="text-[11px] text-[#888] mb-1">Standard sizes (in)</div>
+              <SizeToggleGroup
+                sizes={STANDARD_HOLE_SIZES}
+                enabled={panelState.enabledHoleSizes}
+                onChange={enabledHoleSizes => onStateChange({ enabledHoleSizes })}
+              />
+              <Slider label="Threshold" value={panelState.threshold} min={0} max={255} step={1}
+                onChange={v => onStateChange({ threshold: v })} />
+              <Slider label="Gamma" value={panelState.gamma} min={0.2} max={5} step={0.1}
+                format={v => v.toFixed(1)} onChange={v => onStateChange({ gamma: v })} />
+            </Section>
+
+            {/* Advanced: Backlight Extras */}
             {panelState.backlight && (
-              <>
-                {/* Solid / Gradient toggle */}
+              <Section title="Backlight Extras" defaultOpen={false}>
                 <div className="flex items-center justify-between mb-2 text-[13px]">
                   <span className="text-[#e0e0e0]">Mode</span>
                   <div className="flex bg-[#1a1a1e] rounded-lg overflow-hidden border border-[#3a3a3e]">
@@ -563,7 +831,7 @@ export default function ControlPanel({
                     >Gradient</button>
                   </div>
                 </div>
-                {panelState.backlightMode === 'gradient' ? (
+                {panelState.backlightMode === 'gradient' && (
                   <>
                     <div className="flex items-center justify-between mb-2 text-[13px]">
                       <span className="text-[#e0e0e0]">Colors</span>
@@ -583,7 +851,6 @@ export default function ControlPanel({
                         />
                       </div>
                     </div>
-                    {/* Gradient preview bar */}
                     <div
                       className="h-3 rounded-md mb-2 border border-[#3a3a3e]"
                       style={{ background: `linear-gradient(${90 + panelState.backlightGradientAngle}deg, ${panelState.backlightColor}, ${panelState.backlightColor2})` }}
@@ -591,97 +858,90 @@ export default function ControlPanel({
                     <Slider label="Angle" value={panelState.backlightGradientAngle} min={-180} max={180} step={5}
                       format={v => `${v}°`} onChange={v => onStateChange({ backlightGradientAngle: v })} />
                   </>
-                ) : (
-                  <label className="flex items-center justify-between mb-2 text-[13px]">
-                    <span className="text-[#e0e0e0]">Backlight Color</span>
-                    <input
-                      type="color"
-                      className="w-8 h-6 border border-[#3a3a3e] rounded cursor-pointer bg-transparent p-0.5"
-                      value={panelState.backlightColor}
-                      onChange={e => onStateChange({ backlightColor: e.target.value })}
-                    />
-                  </label>
                 )}
-                <Slider label="Intensity" value={panelState.backlightIntensity} min={0} max={2} step={0.05}
-                  format={v => v.toFixed(1)} onChange={v => onStateChange({ backlightIntensity: v })} />
-              </>
+              </Section>
             )}
-            <Toggle label="Show panel labels" checked={panelState.showLabels} onChange={v => onStateChange({ showLabels: v })} />
-            <Toggle label="Floor" checked={floorEnabled} onChange={onFloorEnabledChange} />
-            <Toggle label="Scale Figure" checked={scaleFigureEnabled} onChange={onScaleFigureEnabledChange} />
-            <Toggle label="Ceiling Mode" checked={ceilingMode} onChange={onCeilingModeChange} />
-          </Section>
+
+            {/* Advanced: Scene */}
+            <Section title="Scene" defaultOpen={false}>
+              <Toggle label="Show panel labels" checked={panelState.showLabels} onChange={v => onStateChange({ showLabels: v })} />
+              <Toggle label="Floor" checked={floorEnabled} onChange={onFloorEnabledChange} />
+              <Toggle label="Scale Figure" checked={scaleFigureEnabled} onChange={onScaleFigureEnabledChange} />
+              <Toggle label="Ceiling Mode" checked={ceilingMode} onChange={onCeilingModeChange} />
+            </Section>
+
+            {/* Advanced: Full Stats */}
+            <Section title="Full Statistics" defaultOpen={false}>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[12px]">
+                <span className="text-[#888]">Wall Size</span>
+                <span className="text-right font-mono">{(panelState.wallW / 12).toFixed(1)}' × {(panelState.wallH / 12).toFixed(1)}'</span>
+                <span className="text-[#888]">Panels</span>
+                <span className="text-right font-mono">
+                  {panelState.panels.length ? `${panelState.colWidths.length} × ${panelState.rowHeights.length} = ${panelState.panels.length}` : '\u2014'}
+                </span>
+                <span className="text-[#888]">Panel Area</span>
+                <span className="text-right font-mono">{stats.panelSF > 0 ? stats.panelSF.toFixed(1) + ' SF' : '\u2014'}</span>
+                <span className="text-[#888]">Total Holes</span>
+                <span className="text-right font-mono">{stats.totalHoles || '\u2014'}</span>
+                <span className="text-[#888]">Open Area</span>
+                <span className="text-right font-mono">{stats.totalHoles ? stats.openAreaPct.toFixed(1) + '%' : '\u2014'}</span>
+                <span className="text-[#888]">Sizes placed</span>
+                <span className="text-right font-mono">
+                  {stats.sizesUsed ? `${stats.sizesUsed} of ${panelState.enabledHoleSizes.length}` : '\u2014'}
+                </span>
+              </div>
+            </Section>
+
+            {/* Advanced: API Key (only if server doesn't have one) */}
+            {!serverHasFalKey && (
+              <Section title="FAL API Key" defaultOpen={false}>
+                <input
+                  type="password"
+                  placeholder="FAL key for Render"
+                  value={falKey}
+                  onChange={e => handleFalKeyChange(e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-[#1a1a1e] border border-[#3a3a3e] rounded text-[#ccc] text-[11px] outline-none"
+                />
+              </Section>
+            )}
+          </>
         )}
-
-        {/* Statistics */}
-        <Section title="Statistics">
-          <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[12px]">
-            <span className="text-[#888]">Wall Size</span>
-            <span className="text-right font-semibold">{(panelState.wallW / 12).toFixed(1)}' x {(panelState.wallH / 12).toFixed(1)}'</span>
-            <span className="text-[#888]">Panels</span>
-            <span className="text-right font-semibold">
-              {panelState.panels.length ? `${panelState.colWidths.length} x ${panelState.rowHeights.length} = ${panelState.panels.length}` : '\u2014'}
-            </span>
-            <span className="text-[#888]">Total Holes</span>
-            <span className="text-right font-semibold">{stats.totalHoles || '\u2014'}</span>
-            <span className="text-[#888]">Open Area</span>
-            <span className="text-right font-semibold">{stats.totalHoles ? stats.openAreaPct.toFixed(1) + '%' : '\u2014'}</span>
-            <span className="text-[#888]">Sizes Used</span>
-            <span className="text-right font-semibold">{stats.sizesUsed ? stats.sizesUsed + ' sizes' : '\u2014'}</span>
-          </div>
-        </Section>
-
-        {/* Pricing */}
-        <Section title="Estimated Pricing">
-          <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[12px]">
-            <span className="text-[#888]">Panel Area</span>
-            <span className="text-right font-semibold">{stats.panelSF > 0 ? stats.panelSF.toFixed(1) + ' SF' : '\u2014'}</span>
-            <span className="text-[#888]">Rate</span>
-            <span className="text-right font-semibold">$42 / SF</span>
-            <span className="text-[#e0e0e0] font-semibold">Estimated Total</span>
-            <span className="text-right font-semibold text-[#4a9eff] text-sm">
-              {stats.estimatedTotal > 0 ? fmtPrice(stats.estimatedTotal) : '\u2014'}
-            </span>
-          </div>
-          <p className="text-[10px] text-[#888] mt-2 leading-relaxed">
-            Panels only. Illumination, mounting hardware, and installation not included.
-          </p>
-        </Section>
-
-        {/* Export */}
-        <Section title="Export">
-          <select
-            className="w-full mb-2 bg-[#2a2a2e] border border-[#3a3a3e] text-[#e0e0e0] rounded px-2 py-1.5 text-[13px]"
-            value={exportTarget}
-            onChange={e => setExportTarget(e.target.value)}
-          >
-            <option value="all">All Panels (Full Wall)</option>
-            {panelState.panels.map(p => (
-              <option key={p.label} value={p.label}>Panel {p.label} ({p.sizeLabel})</option>
-            ))}
-          </select>
-          <div className="flex gap-2">
-            <button
-              className="flex-1 py-2 text-[13px] font-semibold border border-[#3a3a3e] bg-[#2a2a2e] text-[#e0e0e0] rounded-md hover:border-[#4a9eff] hover:bg-[rgba(74,158,255,0.1)] transition-all"
-              onClick={() => exportSVG(panelState, getExportPanels())}
-            >
-              SVG
-            </button>
-            <button
-              className="flex-1 py-2 text-[13px] font-semibold border border-[#3a3a3e] bg-[#2a2a2e] text-[#e0e0e0] rounded-md hover:border-[#4a9eff] hover:bg-[rgba(74,158,255,0.1)] transition-all"
-              onClick={() => exportDXF(panelState, getExportPanels())}
-            >
-              DXF
-            </button>
-            <button
-              className="flex-1 py-2 text-[13px] font-semibold border border-[#3a3a3e] bg-[#2a2a2e] text-[#e0e0e0] rounded-md hover:border-[#4a9eff] hover:bg-[rgba(74,158,255,0.1)] transition-all"
-              onClick={handleExportPNG}
-            >
-              PNG
-            </button>
-          </div>
-        </Section>
       </div>
+
+      {/* Render Result Modal */}
+      {renderResult && (
+        <div
+          className="fixed inset-0 bg-black/85 flex items-center justify-center z-[9999] cursor-pointer"
+          onClick={() => setRenderResult(null)}
+        >
+          <div className="relative max-w-[90vw] max-h-[90vh]" onClick={e => e.stopPropagation()}>
+            <img src={renderResult} alt="Photorealistic Render" className="max-w-[90vw] max-h-[85vh] rounded-xl shadow-[0_20px_60px_rgba(0,0,0,0.5)]" />
+            <div className="flex gap-2 justify-center mt-3">
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await fetch(renderResult!);
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'mr-walls-render.png';
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  } catch {
+                    window.open(renderResult!, '_blank');
+                  }
+                }}
+                className="px-6 py-2.5 bg-[#4a9eff] text-white border-none rounded-md text-[13px] font-semibold cursor-pointer"
+              >Download</button>
+              <button
+                onClick={() => setRenderResult(null)}
+                className="px-6 py-2.5 bg-[#4a4a52] text-white border-none rounded-md text-[13px] font-semibold cursor-pointer"
+              >Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

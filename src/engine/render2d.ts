@@ -21,8 +21,16 @@ export function render2d(
   state: PanelState,
   camX: number,
   camY: number,
-  camZoom: number
+  camZoom: number,
+  theme: 'dark' | 'light' = 'dark',
 ) {
+  const isLight = theme === 'light';
+  const borderRgba = isLight ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.25)';
+  const outlineRgba = isLight ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.12)';
+  const labelMain = isLight ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.3)';
+  const labelSub = isLight ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.2)';
+  const dimColor = isLight ? 'rgba(20,20,30,0.75)' : 'rgba(255,255,255,0.55)';
+  const dimTextColor = isLight ? 'rgba(10,10,15,0.9)' : 'rgba(255,255,255,0.75)';
   const ctx = canvas.getContext('2d')!;
   const w = canvas.width, h = canvas.height;
   ctx.clearRect(0, 0, w, h);
@@ -110,7 +118,7 @@ export function render2d(
     }
 
     // Panel border
-    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.strokeStyle = borderRgba;
     ctx.lineWidth = 1.5 / camZoom;
     ctx.strokeRect(0, 0, panel.w, panel.h);
 
@@ -118,12 +126,12 @@ export function render2d(
     if (state.showLabels) {
       const fs = Math.min(panel.w, panel.h) * 0.07;
       ctx.font = `bold ${fs}px sans-serif`;
-      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.fillStyle = labelMain;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(panel.label, panel.w / 2, panel.h / 2 - fs * 0.6);
       ctx.font = `${fs * 0.6}px sans-serif`;
-      ctx.fillStyle = 'rgba(255,255,255,0.2)';
+      ctx.fillStyle = labelSub;
       ctx.fillText(panel.sizeLabel, panel.w / 2, panel.h / 2 + fs * 0.5);
     }
     ctx.restore();
@@ -131,7 +139,7 @@ export function render2d(
 
   // Wall outline
   ctx.setLineDash([4 / camZoom, 4 / camZoom]);
-  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  ctx.strokeStyle = outlineRgba;
   ctx.lineWidth = 1 / camZoom;
   ctx.strokeRect(0, 0, wW, wH);
   ctx.setLineDash([]);
@@ -142,8 +150,6 @@ export function render2d(
     const tick = 6 / camZoom;
     const dimOffset = 18 / camZoom;
     const fontSize = Math.max(4, 4 / camZoom);
-    const dimColor = 'rgba(255,255,255,0.55)';
-    const dimTextColor = 'rgba(255,255,255,0.75)';
     ctx.strokeStyle = dimColor;
     ctx.lineWidth = lw;
     ctx.setLineDash([]);

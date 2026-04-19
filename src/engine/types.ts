@@ -34,6 +34,7 @@ export interface AxisSolution {
 export interface PanelState {
   // Image
   sourceImage: HTMLImageElement | null;
+  imageName: string;
   grayPixels: Float32Array | null;
   imgWidth: number;
   imgHeight: number;
@@ -98,6 +99,7 @@ export type LightingPreset = 'standard' | 'dramatic' | 'sunset' | 'cool' | 'nigh
 
 export const DEFAULT_PANEL_STATE: PanelState = {
   sourceImage: null,
+  imageName: '',
   grayPixels: null,
   imgWidth: 0,
   imgHeight: 0,
@@ -126,7 +128,7 @@ export const DEFAULT_PANEL_STATE: PanelState = {
   panelColor: '#808080',
   bgColor: '#111111',
   backlight: true,
-  backlightMode: 'gradient',
+  backlightMode: 'solid',
   backlightColor: '#ff69b4',
   backlightColor2: '#4488ff',
   backlightGradientAngle: 0,

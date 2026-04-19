@@ -2,9 +2,10 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import type { PanelState, LightingPreset } from './engine/types';
 import { DEFAULT_PANEL_STATE } from './engine/types';
 import { processImage, solveAndBuildPanels, computeAllHoles } from './engine/panelEngine';
-import ChatPanel from './components/ChatPanel';
+import AskMaraDrawer from './components/AskMaraDrawer';
 import ControlPanel from './components/ControlPanel';
 import MainViewport from './components/MainViewport';
+import OnboardingWizard from './components/OnboardingWizard';
 
 export default function App() {
   const [panelState, setPanelState] = useState<PanelState>({ ...DEFAULT_PANEL_STATE });
@@ -13,22 +14,10 @@ export default function App() {
   const [scaleFigureEnabled, setScaleFigureEnabled] = useState(true);
   const [activeTab, setActiveTab] = useState<'2d' | '3d' | 'guide'>('3d');
   const [ceilingMode, setCeilingMode] = useState(false);
-
-  // Onboarding
-  const [isFirstTimeUser, setIsFirstTimeUser] = useState(false);
-  const [sidebarReady, setSidebarReady] = useState(true);
-
-  useEffect(() => {
-    const onboarded = localStorage.getItem('perfpanel_onboarded') === 'true';
-    setIsFirstTimeUser(!onboarded);
-    setSidebarReady(onboarded);
-  }, []);
-
-  const completeOnboarding = useCallback(() => {
-    setIsFirstTimeUser(false);
-    localStorage.setItem('perfpanel_onboarded', 'true');
-    setTimeout(() => setSidebarReady(true), 50);
-  }, []);
+  const [askMaraOpen, setAskMaraOpen] = useState(false);
+  const [onboarded, setOnboarded] = useState(() =>
+    typeof window !== 'undefined' ? localStorage.getItem('perfpanel_onboarded') === 'true' : false,
+  );
 
   // Three.js refs (typed as unknown to avoid importing THREE in the main bundle)
   const rendererRef = useRef<unknown>(null);
@@ -139,9 +128,10 @@ export default function App() {
     setPanelState(prev => recomputeFull(prev));
   }, [recomputeFull]);
 
-  // Auto-load default sample image on mount
+  // Auto-load default sample image on mount — only for returning users
   const autoLoadedRef = useRef(false);
   useEffect(() => {
+    if (!onboarded) return;
     if (autoLoadedRef.current) return;
     autoLoadedRef.current = true;
     const img = new Image();
@@ -160,25 +150,44 @@ export default function App() {
       }, 'image/jpeg', 0.92);
     };
     img.src = '/samples/gradient_sunset_skyline_colorful.jpg';
-  }, [handleImageLoad]);
+  }, [handleImageLoad, onboarded]);
+
+  // Onboarding completion — atomic apply of size + image, unlock UI only when image is ready
+  const handleOnboardingComplete = useCallback(
+    ({ wallW, wallH, sampleFile, sampleLabel, uploadedFile }: { wallW: number; wallH: number; sampleFile?: string; sampleLabel?: string; uploadedFile?: File }) => {
+      localStorage.setItem('perfpanel_onboarded', 'true');
+
+      const applyAndUnlock = (img: HTMLImageElement | null, imageName: string) => {
+        setPanelState(prev => {
+          const next = { ...prev, wallW, wallH, imageName, ...(img ? { sourceImage: img } : {}) };
+          return recomputeFull(next);
+        });
+        setTimeout(() => setOnboarded(true), 400);
+      };
+
+      if (uploadedFile) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => applyAndUnlock(img, uploadedFile.name.replace(/\.[^.]+$/, ''));
+          img.src = e.target?.result as string;
+        };
+        reader.readAsDataURL(uploadedFile);
+      } else if (sampleFile) {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => applyAndUnlock(img, sampleLabel || sampleFile.replace(/\.[^.]+$/, ''));
+        img.onerror = () => applyAndUnlock(null, '');
+        img.src = `/samples/${sampleFile}`;
+      } else {
+        applyAndUnlock(null, '');
+      }
+    },
+    [recomputeFull],
+  );
 
   return (
-    <div className="flex w-screen h-screen">
-      {/* Left: AI Chat Panel */}
-      <ChatPanel
-        onStateChange={handleStateChange}
-        onLightingPresetChange={setLightingPreset}
-        onScaleFigureEnabledChange={setScaleFigureEnabled}
-        onFloorEnabledChange={setFloorEnabled}
-        onCeilingModeChange={setCeilingMode}
-        rendererRef={rendererRef}
-        sceneRef={sceneRef}
-        cameraRef={cameraRef}
-        isFloating={isFirstTimeUser}
-        sidebarReady={sidebarReady}
-        onOnboardingComplete={completeOnboarding}
-      />
-
+    <div className="flex w-screen h-screen relative">
       {/* Center: Main Viewport */}
       <MainViewport
         activeTab={activeTab}
@@ -193,24 +202,51 @@ export default function App() {
         cameraRef={cameraRef}
       />
 
-      {/* Right: Control Panel */}
-      <ControlPanel
-        panelState={panelState}
-        onStateChange={handleStateChange}
-        onImageLoad={handleImageLoad}
-        onImageClear={handleImageClear}
-        floorEnabled={floorEnabled}
-        onFloorEnabledChange={setFloorEnabled}
-        scaleFigureEnabled={scaleFigureEnabled}
-        onScaleFigureEnabledChange={setScaleFigureEnabled}
-        ceilingMode={ceilingMode}
-        onCeilingModeChange={setCeilingMode}
-        canvasRef={canvasRef}
-        rendererRef={rendererRef}
-        sceneRef={sceneRef}
-        cameraRef={cameraRef}
-        activeTab={activeTab}
-      />
+      {/* Right: Control Panel (with embedded Ask Mara button + Render) */}
+      <div
+        className="relative overflow-hidden"
+        style={{
+          width: 360,
+          opacity: onboarded ? 1 : 0,
+          pointerEvents: onboarded ? 'auto' : 'none',
+          transition: 'opacity 0.6s ease 0.2s',
+        }}
+      >
+        <ControlPanel
+          panelState={panelState}
+          onStateChange={handleStateChange}
+          onImageLoad={handleImageLoad}
+          onImageClear={handleImageClear}
+          floorEnabled={floorEnabled}
+          onFloorEnabledChange={setFloorEnabled}
+          scaleFigureEnabled={scaleFigureEnabled}
+          onScaleFigureEnabledChange={setScaleFigureEnabled}
+          ceilingMode={ceilingMode}
+          onCeilingModeChange={setCeilingMode}
+          canvasRef={canvasRef}
+          rendererRef={rendererRef}
+          sceneRef={sceneRef}
+          cameraRef={cameraRef}
+          activeTab={activeTab}
+          onOpenAskMara={() => setAskMaraOpen(true)}
+        />
+
+        {/* Ask Mara drawer — slides over ControlPanel */}
+        {askMaraOpen && (
+          <AskMaraDrawer
+            isOpen={askMaraOpen}
+            onClose={() => setAskMaraOpen(false)}
+            onStateChange={handleStateChange}
+            onLightingPresetChange={setLightingPreset}
+            onScaleFigureEnabledChange={setScaleFigureEnabled}
+            onFloorEnabledChange={setFloorEnabled}
+            onCeilingModeChange={setCeilingMode}
+          />
+        )}
+      </div>
+
+      {/* Onboarding — first visit only */}
+      {!onboarded && <OnboardingWizard onComplete={handleOnboardingComplete} />}
     </div>
   );
 }

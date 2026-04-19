@@ -272,7 +272,7 @@ app.post('/api/render', async (req, res) => {
 
   try {
     const uploadRes = await fetch(
-      'https://fal.run/fal-ai/nano-banana-pro/edit',
+      'https://fal.run/fal-ai/nano-banana-2/edit',
       {
         method: 'POST',
         headers: {
