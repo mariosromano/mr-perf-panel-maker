@@ -216,31 +216,52 @@ export default async function handler(req, res) {
   }
   messages.push({ role: 'user', content: message });
 
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+
+  const send = (evt) => res.write(`data: ${JSON.stringify(evt)}\n\n`);
+
   try {
-    const response = await client.messages.create({
+    const stream = await client.messages.stream({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 1024,
       system: SYSTEM_PROMPT,
       messages,
     });
 
-    const textBlock = response.content.find((b) => b.type === 'text');
-    const text = textBlock ? textBlock.text : '';
+    let fullText = '';
+    let inJsonBlock = false; // don't show the ```json ... ``` block to the user while streaming
 
-    const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
-    let params = {};
-
-    if (jsonMatch) {
-      try {
-        params = JSON.parse(jsonMatch[1]);
-      } catch {}
+    for await (const event of stream) {
+      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+        const chunk = event.delta.text;
+        fullText += chunk;
+        // Start of JSON fence — stop streaming visible text
+        if (!inJsonBlock && /```json/.test(fullText)) {
+          inJsonBlock = true;
+          // Flush any text up to the fence (best-effort)
+          const preFence = fullText.split(/```json/)[0];
+          // Nothing to send now — client has already received up to preFence via prior deltas
+        }
+        if (!inJsonBlock) send({ type: 'delta', text: chunk });
+      }
     }
 
-    const displayText = text.replace(/```json\s*[\s\S]*?\s*```/, '').trim();
+    // Extract params + clean display text
+    const jsonMatch = fullText.match(/```json\s*([\s\S]*?)\s*```/);
+    let params = {};
+    if (jsonMatch) {
+      try { params = JSON.parse(jsonMatch[1]); } catch {}
+    }
+    const displayText = fullText.replace(/```json\s*[\s\S]*?\s*```/, '').trim();
 
-    res.json({ text: displayText, params });
+    send({ type: 'done', params, fullText: displayText });
+    res.end();
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-    res.status(500).json({ error: errorMessage });
+    send({ type: 'error', error: errorMessage });
+    res.end();
   }
 }

@@ -116,7 +116,7 @@ export default function AskMaraDrawer({
       return;
     }
     const userMsg: ChatMessage = { role: 'user', content: input.trim() };
-    setMessages(prev => [...prev, userMsg]);
+    setMessages(prev => [...prev, userMsg, { role: 'assistant', content: '' }]);
     setInput('');
     setLoading(true);
     setError(null);
@@ -129,12 +129,60 @@ export default function AskMaraDrawer({
         headers: chatHeaders,
         body: JSON.stringify({ message: input.trim(), history }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Request failed');
-      setMessages(prev => [...prev, { role: 'assistant', content: data.text }]);
-      if (data.params && Object.keys(data.params).length > 0) applyParams(data.params);
+      if (!res.ok || !res.body) {
+        const t = await res.text();
+        throw new Error(t || 'Request failed');
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let streamError: string | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split('\n\n');
+        buffer = events.pop() || '';
+        for (const raw of events) {
+          const line = raw.trim();
+          if (!line.startsWith('data:')) continue;
+          let evt: Record<string, unknown>;
+          try { evt = JSON.parse(line.slice(5).trim()); } catch { continue; }
+          if (evt.type === 'delta' && typeof evt.text === 'string') {
+            const delta = evt.text;
+            setMessages(prev => {
+              const last = prev[prev.length - 1];
+              if (!last || last.role !== 'assistant') return prev;
+              return [...prev.slice(0, -1), { ...last, content: last.content + delta }];
+            });
+          } else if (evt.type === 'done') {
+            if (typeof evt.fullText === 'string') {
+              const finalText = evt.fullText as string;
+              setMessages(prev => {
+                const last = prev[prev.length - 1];
+                if (!last || last.role !== 'assistant') return prev;
+                return [...prev.slice(0, -1), { ...last, content: finalText }];
+              });
+            }
+            if (evt.params && typeof evt.params === 'object' && Object.keys(evt.params as object).length > 0) {
+              applyParams(evt.params as Record<string, unknown>);
+            }
+          } else if (evt.type === 'error') {
+            streamError = (evt.error as string) || 'Stream error';
+          }
+        }
+      }
+      if (streamError) throw new Error(streamError);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Unknown error');
+      // Drop the empty assistant bubble if the stream failed before any text
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+        if (last?.role === 'assistant' && last.content === '') return prev.slice(0, -1);
+        return prev;
+      });
     } finally {
       setLoading(false);
     }
@@ -157,14 +205,17 @@ export default function AskMaraDrawer({
       }}
     >
       {/* Header */}
-      <div className="px-5 py-3.5 border-b border-[#3a3a3e] flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-full bg-gradient-to-br from-[#4a9eff] to-[#8a5aff] flex items-center justify-center text-[11px] font-bold text-white">M</div>
-          <div className="text-[14px] font-semibold text-white">Ask Mara</div>
+      <div className="px-5 py-3.5 border-b border-[#3a3a3e] bg-gradient-to-br from-[#2a2a2e] to-[#1a1a1e] flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#4a9eff] to-[#8a5aff] flex items-center justify-center text-[12px] font-bold text-white shadow-[0_2px_8px_rgba(74,158,255,0.4)]">M</div>
+          <div>
+            <div className="text-[14px] font-semibold text-white leading-none">Ask Mara</div>
+            <div className="text-[10px] text-[#888] mt-0.5">Design assistant</div>
+          </div>
         </div>
         <button
           onClick={onClose}
-          className="w-7 h-7 rounded-md text-[#888] hover:text-white hover:bg-[#3a3a3e] transition-colors flex items-center justify-center"
+          className="w-7 h-7 rounded-md text-[#888] hover:text-white hover:bg-[#3a3a3e] transition-colors flex items-center justify-center text-lg"
           aria-label="Close"
         >
           &times;
@@ -173,7 +224,7 @@ export default function AskMaraDrawer({
 
       {/* API Key input (only if server doesn't have it) */}
       {!serverHasAnthropicKey && (
-        <div className="px-5 py-2 border-b border-[#3a3a3e]">
+        <div className="px-5 py-2 border-b border-[#3a3a3e] shrink-0">
           <input
             type="password"
             placeholder="Anthropic API Key (sk-ant-...)"
@@ -184,66 +235,78 @@ export default function AskMaraDrawer({
         </div>
       )}
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-5 py-4">
-        {messages.map((msg, i) => (
-          <div key={i} className={`mb-3 flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div
-              className={`px-3.5 py-2.5 text-[12.5px] leading-relaxed max-w-[88%] whitespace-pre-wrap text-white ${
-                msg.role === 'user'
-                  ? 'bg-[#4a9eff] rounded-[14px_14px_4px_14px]'
-                  : 'bg-[#3a3a3e] rounded-[14px_14px_14px_4px]'
-              }`}
-            >
-              {msg.content}
-            </div>
-          </div>
-        ))}
-        {loading && (
-          <div className="px-3.5 py-2.5 rounded-[14px_14px_14px_4px] bg-[#3a3a3e] text-[#888] text-[13px] inline-block">
-            Thinking...
-          </div>
-        )}
-        {error && <div className="px-3 py-2 rounded-lg bg-[#4a2a2a] text-[#ff6b6b] text-xs">{error}</div>}
-        <div ref={chatEndRef} />
-      </div>
-
-      {/* Suggestions */}
+      {/* Compact welcome section — greeting + suggestions together, near top */}
       {messages.length <= 1 && (
-        <div className="px-5 pb-2 flex flex-col gap-1.5">
-          {SUGGESTIONS.map((s, i) => (
-            <button
-              key={i}
-              onClick={() => setInput(s)}
-              className="text-left px-3 py-2 bg-[#1a1a1e] border border-[#3a3a3e] rounded-md text-[12px] text-[#bbb] hover:border-[#4a9eff] hover:text-[#4a9eff] transition-colors"
-            >
-              {s}
-            </button>
-          ))}
+        <div className="px-5 pt-4 pb-3 shrink-0">
+          <div className="px-3.5 py-2.5 rounded-[14px_14px_14px_4px] bg-[#2a2a2e] text-[12.5px] leading-relaxed text-[#e0e0e0] mb-3 border border-[#3a3a3e]">
+            {messages[0]?.content}
+          </div>
+          <div className="text-[10px] font-semibold text-[#666] uppercase tracking-wider mb-1.5">Try one of these</div>
+          <div className="flex flex-col gap-1.5">
+            {SUGGESTIONS.map((s, i) => (
+              <button
+                key={i}
+                onClick={() => { setInput(s); inputRef.current?.focus(); }}
+                className="text-left px-3 py-2 bg-[#1a1a1e] border border-[#3a3a3e] rounded-md text-[12px] text-[#bbb] hover:border-[#4a9eff] hover:text-[#4a9eff] hover:bg-[rgba(74,158,255,0.06)] transition-all"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
-      {/* Input */}
-      <div className="p-4 px-5 border-t border-[#3a3a3e] bg-[#2a2a2e]">
-        <div className="flex gap-2">
+      {/* Messages (only when > 1 message) */}
+      {messages.length > 1 && (
+        <div className="flex-1 overflow-y-auto px-5 py-4 min-h-0">
+          {messages.map((msg, i) => (
+            <div key={i} className={`mb-3 flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div
+                className={`px-3.5 py-2.5 text-[12.5px] leading-relaxed max-w-[88%] whitespace-pre-wrap text-white ${
+                  msg.role === 'user'
+                    ? 'bg-[#4a9eff] rounded-[14px_14px_4px_14px]'
+                    : 'bg-[#3a3a3e] rounded-[14px_14px_14px_4px]'
+                }`}
+              >
+                {msg.content || (loading && i === messages.length - 1 && msg.role === 'assistant' ? '…' : msg.content)}
+              </div>
+            </div>
+          ))}
+          {error && <div className="px-3 py-2 rounded-lg bg-[#4a2a2a] text-[#ff6b6b] text-xs">{error}</div>}
+          <div ref={chatEndRef} />
+        </div>
+      )}
+
+      {/* Spacer that only exists when intro is shown — keeps input near top but pushes it to bottom when messages flow */}
+      {messages.length <= 1 && <div className="flex-1 min-h-0" />}
+
+      {/* Input — compact, close to content */}
+      <div className="px-5 pt-2 pb-4 border-t border-[#3a3a3e] bg-[#1c1c20] shrink-0">
+        <div className="flex gap-2 items-end">
           <textarea
             ref={inputRef}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="How should I tune it?"
+            placeholder="Ask me anything — tune sliders, recommend a vibe, explain a feature…"
             rows={2}
-            className="flex-1 px-3 py-2 bg-[#1a1a1e] border border-[#3a3a3e] rounded-lg text-white text-[13px] resize-none outline-none focus:border-[#4a9eff] transition-colors placeholder:text-[#666]"
+            className="flex-1 px-3 py-2 bg-[#0f0f12] border border-[#3a3a3e] rounded-lg text-white text-[13px] resize-none outline-none focus:border-[#4a9eff] transition-colors placeholder:text-[#555] leading-relaxed"
           />
           <button
             onClick={sendMessage}
             disabled={loading || !input.trim()}
-            className={`px-4 py-2 rounded-lg text-[13px] font-semibold text-white self-end ${
-              loading || !input.trim() ? 'bg-[#555] cursor-default' : 'bg-[#4a9eff] cursor-pointer hover:bg-[#3a8eef]'
+            className={`px-4 py-2.5 rounded-lg text-[13px] font-semibold text-white transition-all ${
+              loading || !input.trim()
+                ? 'bg-[#3a3a3e] text-[#888] cursor-default'
+                : 'bg-gradient-to-br from-[#4a9eff] to-[#6a7eff] cursor-pointer hover:brightness-110 shadow-[0_2px_10px_rgba(74,158,255,0.3)]'
             }`}
           >
-            Send
+            {loading ? '…' : 'Send'}
           </button>
+        </div>
+        <div className="text-[9.5px] text-[#555] mt-1.5 flex items-center gap-2">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#4ade80]"></span>
+          Powered by Haiku 4.5 · streaming
         </div>
       </div>
     </div>
