@@ -34,7 +34,7 @@ function Section({ title, children, defaultOpen = true }: { title: string; child
         <span className="text-[11px] font-semibold text-[#888] uppercase tracking-wider">{title}</span>
         <span className="text-[#666] text-[10px]">{open ? '\u25B2' : '\u25BC'}</span>
       </button>
-      {open && <div className="pl-5 pr-6 pb-3.5 pt-0.5">{children}</div>}
+      {open && <div className="pl-5 pr-6 pb-4 pt-1">{children}</div>}
     </div>
   );
 }
@@ -166,7 +166,17 @@ export default function ControlPanel({
   const [renderError, setRenderError] = useState<string | null>(null);
   const [renderProgress, setRenderProgress] = useState(0);
   const [renderStartTime, setRenderStartTime] = useState<number | null>(null);
+  const [renderExtraPrompt, setRenderExtraPrompt] = useState('');
+  const [showRenderOptions, setShowRenderOptions] = useState(false);
   const renderTimerRef = useRef<ReturnType<typeof setInterval>>(undefined);
+
+  const RENDER_PRESETS = [
+    'Modern hotel lobby with marble floors',
+    'Restaurant interior, warm mood lighting',
+    'Corporate office atrium, daylight',
+    'Luxury residence entryway',
+    'Nightclub with fog and laser accents',
+  ];
   const [falKey, setFalKey] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('perfpanel_fal_key') ?? '' : ''));
   const [serverHasFalKey, setServerHasFalKey] = useState(true);
 
@@ -302,7 +312,8 @@ export default function ControlPanel({
       const dataUrl = captureScreenshot();
       if (!dataUrl) throw new Error('Could not capture screenshot');
       const base64 = dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
-      const prompt = buildRenderPrompt(panelState);
+      const basePrompt = buildRenderPrompt(panelState);
+      const prompt = renderExtraPrompt.trim() ? `${basePrompt}, ${renderExtraPrompt.trim()}` : basePrompt;
       const renderHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
       if (falKey) renderHeaders['x-fal-key'] = falKey;
       const res = await fetch('/api/render', {
@@ -322,7 +333,7 @@ export default function ControlPanel({
       setRendering(false);
       setRenderStartTime(null);
     }
-  }, [falKey, serverHasFalKey, panelState, captureScreenshot]);
+  }, [falKey, serverHasFalKey, panelState, captureScreenshot, renderExtraPrompt]);
 
   const density = spacingToDensity(panelState.spacingX);
   const handleDensityChange = (d: number) => {
@@ -421,7 +432,9 @@ export default function ControlPanel({
               ))}
             </div>
           )}
-          <Toggle label="Invert Image" checked={panelState.invert} onChange={v => onStateChange({ invert: v })} />
+          <div className="mt-4 pt-3 border-t border-[#2a2a2e]">
+            <Toggle label="Invert Image" checked={panelState.invert} onChange={v => onStateChange({ invert: v })} />
+          </div>
         </Section>
 
         {/* Wall Dimensions — W / H only in default; Gap in Advanced */}
@@ -614,13 +627,57 @@ export default function ControlPanel({
               PDF
             </button>
           </div>
+          {/* Render scene options */}
+          <div className="mt-3 mb-2">
+            <button
+              onClick={() => setShowRenderOptions(!showRenderOptions)}
+              className="w-full flex items-center justify-between text-[10px] font-semibold text-[#888] uppercase tracking-wider mb-2 hover:text-[#ccc] transition-colors"
+            >
+              <span>Scene Context {renderExtraPrompt && <span className="text-[#4a9eff] normal-case font-normal ml-1">· customized</span>}</span>
+              <span className="text-[#666] text-[9px]">{showRenderOptions ? '\u25B2' : '\u25BC'}</span>
+            </button>
+            {showRenderOptions && (
+              <>
+                <div className="flex flex-wrap gap-1 mb-2">
+                  {RENDER_PRESETS.map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => setRenderExtraPrompt(p)}
+                      className={`px-2 py-1 text-[10px] border rounded transition-all ${
+                        renderExtraPrompt === p
+                          ? 'border-[#7a5aaa] bg-[rgba(122,90,170,0.15)] text-[#c9a0ff]'
+                          : 'border-[#3a3a3e] bg-[#2a2a2e] text-[#888] hover:border-[#555] hover:text-[#ccc]'
+                      }`}
+                    >
+                      {p.split(',')[0]}
+                    </button>
+                  ))}
+                </div>
+                <textarea
+                  value={renderExtraPrompt}
+                  onChange={(e) => setRenderExtraPrompt(e.target.value)}
+                  placeholder="Add scene details (e.g. 'hotel lobby, people walking by, golden hour')"
+                  rows={2}
+                  className="w-full px-2.5 py-2 bg-[#1a1a1e] border border-[#3a3a3e] rounded text-[#ccc] text-[11px] leading-relaxed resize-none outline-none focus:border-[#7a5aaa] transition-colors placeholder:text-[#555]"
+                />
+                {renderExtraPrompt && (
+                  <button
+                    onClick={() => setRenderExtraPrompt('')}
+                    className="text-[10px] text-[#666] hover:text-[#ccc] mt-1 transition-colors"
+                  >
+                    Clear
+                  </button>
+                )}
+              </>
+            )}
+          </div>
           <button
             onClick={handleRender}
             disabled={rendering || (!falKey && !serverHasFalKey)}
             className={`w-full py-2.5 rounded-md text-[13px] font-bold text-white transition-all ${
               rendering || (!falKey && !serverHasFalKey)
                 ? 'bg-[#555] cursor-default'
-                : 'bg-gradient-to-br from-[#7a5aaa] to-[#5a3a8a] cursor-pointer hover:brightness-110'
+                : 'bg-gradient-to-br from-[#7a5aaa] to-[#5a3a8a] cursor-pointer hover:brightness-110 shadow-[0_2px_12px_rgba(122,90,170,0.35)]'
             }`}
           >
             {rendering ? `Rendering... ${Math.round(renderProgress)}%` : 'Render Realistic'}
